@@ -101,6 +101,9 @@ public:
                                obs_property_t *property,
                                obs_data_t *settings);
   static bool RefreshClicked(obs_properties_t *props, obs_property_t *property, void *data);
+#ifdef AUTO_CAPTURE_HAS_UI
+  static bool OpenSettingsClicked(obs_properties_t *props, obs_property_t *property, void *data);
+#endif
   static bool OpenWindowPickerClicked(obs_properties_t *props, obs_property_t *property, void *data);
   static bool AddRuleClicked(obs_properties_t *props, obs_property_t *property, void *data);
   static bool DeleteRuleClicked(obs_properties_t *props, obs_property_t *property, void *data);

@@ -1,5 +1,9 @@
 #include "auto-capture-source.hpp"
 
+#ifdef AUTO_CAPTURE_HAS_UI
+#include "settings-window.hpp"
+#endif
+
 #include <dwmapi.h>
 
 #include <util/dstr.h>
@@ -86,6 +90,7 @@ constexpr const char *kPickWindowAction = "pick_window";
 constexpr const char *kAddRuleAction = "add_rule";
 constexpr const char *kDeleteRuleAction = "delete_rule";
 constexpr const char *kRefreshAction = "refresh_state";
+constexpr const char *kOpenSettingsAction = "open_settings";
 
 constexpr const char *kWindowCaptureSourceId = "window_capture";
 constexpr const char *kWindowCaptureWindowSetting = "window";
@@ -1704,6 +1709,20 @@ bool AutoCaptureSource::RuleFieldModified(void *data,
   return false;
 }
 
+#ifdef AUTO_CAPTURE_HAS_UI
+// Property callbacks run on the UI thread, which is the only thread allowed to
+// touch Qt. Opening the window from anywhere else would be a crash waiting to
+// happen.
+bool AutoCaptureSource::OpenSettingsClicked(obs_properties_t *, obs_property_t *, void *data)
+{
+  auto *instance = static_cast<AutoCaptureSource *>(data);
+  if (instance != nullptr && instance->source_ != nullptr) {
+    auto_capture_open_settings(instance->source_);
+  }
+  return false;
+}
+#endif
+
 bool AutoCaptureSource::BlurModeModified(void *,
                                          obs_properties_t *props,
                                          obs_property_t *,
@@ -1932,6 +1951,14 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
   obs_property_text_set_info_word_wrap(status, true);
   obs_properties_add_button2(properties, kRefreshAction, Text("AutoAppCapture.Actions.Refresh"),
                              AutoCaptureSource::RefreshClicked, data);
+
+#ifdef AUTO_CAPTURE_HAS_UI
+  // The sections below stay where they are until the window can replace them.
+  // Removing them first would leave the plugin unconfigurable for anyone whose
+  // OBS cannot open the window.
+  obs_properties_add_button2(properties, kOpenSettingsAction, Text("AutoAppCapture.Actions.Configure"),
+                             AutoCaptureSource::OpenSettingsClicked, data);
+#endif
 
   // --- Section selector ---------------------------------------------------
   obs_property_t *section_list = obs_properties_add_list(properties, kUiSectionSetting, Text("AutoAppCapture.Section"),

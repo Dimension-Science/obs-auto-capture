@@ -1,5 +1,9 @@
 #include "auto-capture-source.hpp"
 
+#ifdef AUTO_CAPTURE_HAS_UI
+#include "settings-window.hpp"
+#endif
+
 #include <obs-module.h>
 
 OBS_DECLARE_MODULE()
@@ -24,6 +28,10 @@ bool obs_module_load(void)
 
 void obs_module_unload(void)
 {
+#ifdef AUTO_CAPTURE_HAS_UI
+  // Qt widgets created by this module must not outlive it.
+  auto_capture_close_settings_windows();
+#endif
   auto_capture_release_ui_resources();
   blog(LOG_INFO, "[obs-auto-capture] Plugin unloaded.");
 }

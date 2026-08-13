@@ -8,10 +8,10 @@ if(NOT OS_WINDOWS)
   message(FATAL_ERROR "obs-auto-capture supports Windows only: it is built on Win32 window management and UI Automation.")
 endif()
 
-# Reserved for the settings window. Nothing in the plugin needs Qt yet, and
-# every option left off is a dependency the plugin cannot break on.
-option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
-option(ENABLE_QT "Use Qt functionality" OFF)
+# The settings window needs both. With either one off the plugin still builds
+# and works, only without the window: the source properties keep every setting.
+option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" ON)
+option(ENABLE_QT "Use Qt functionality" ON)
 
 include(compilerconfig)
 include(defaults)
@@ -42,6 +42,11 @@ target_sources(
     src/address-bar-locator.cpp
     src/address-bar-locator.hpp
 )
+
+if(ENABLE_QT AND ENABLE_FRONTEND_API)
+  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/settings-window.cpp src/settings-window.hpp)
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE AUTO_CAPTURE_HAS_UI)
+endif()
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
