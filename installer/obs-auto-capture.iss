@@ -15,8 +15,12 @@
 ; Output: dist\obs-auto-capture-<version>-setup.exe
 
 #define AppName "OBS Auto Capture"
-#define AppVersion "1.0.0"
-#define AppPublisher "geekfreak"
+; Overridable so a release build stamps the tag instead of an edited constant:
+;   ISCC.exe /DAppVersion=1.2.0 installer\obs-auto-capture.iss
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
+#endif
+#define AppPublisher "Dimension Science"
 #define PluginId "obs-auto-capture"
 ; Overridable so CI can package what it just built:
 ;   ISCC.exe /DPayloadDir=..\release\obs-auto-capture installer\obs-auto-capture.iss

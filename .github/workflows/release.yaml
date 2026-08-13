@@ -1,0 +1,89 @@
+name: Release
+
+# Builds the plugin, packages it both ways and attaches the result to a GitHub
+# release. Triggered by a version tag, so what ships is always something that
+# was tagged rather than something that happened to be on a branch.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp when running by hand"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and package
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_type }}" -eq "tag") {
+            "${{ github.ref_name }}" -replace '^v', ''
+          } else {
+            "${{ inputs.version }}"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "Packaging version $version"
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-windows-x64-${{ hashFiles('buildspec.json') }}
+
+      - name: Configure
+        run: cmake --preset windows-ci-x64
+
+      - name: Build
+        run: cmake --build --preset windows-ci-x64
+
+      - name: Install
+        run: cmake --install build_x64 --config RelWithDebInfo --prefix release
+
+      # The zip is for anyone who unpacks plugins by hand or uses a portable
+      # OBS; the installer is for everyone else.
+      - name: Package the zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          Compress-Archive -Path release/obs-auto-capture -DestinationPath "artifacts/obs-auto-capture-${{ steps.version.outputs.version }}-windows-x64.zip"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Package the installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DPayloadDir=..\release\obs-auto-capture" `
+            "/DAppVersion=${{ steps.version.outputs.version }}" `
+            "/O..\artifacts" `
+            installer\obs-auto-capture.iss
+
+      - name: Show what will be published
+        shell: pwsh
+        run: Get-ChildItem artifacts | ForEach-Object { "{0}  {1:N0} bytes" -f $_.Name, $_.Length }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: obs-auto-capture-release
+          path: artifacts/
+
+      - name: Attach to the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: true
+          generate_release_notes: true
