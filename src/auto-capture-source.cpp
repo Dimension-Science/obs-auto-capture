@@ -1911,21 +1911,28 @@ bool AutoCaptureSource::DeleteRuleClicked(obs_properties_t *props, obs_property_
 obs_properties_t *AutoCaptureSource::GetProperties(void *data)
 {
   auto *instance = static_cast<AutoCaptureSource *>(data);
-  const std::vector<WindowOption> windows = CollectWindows();
-  const std::vector<ProcessOption> processes = CollectProcesses(windows);
 
   std::vector<AutoCaptureRule> rules;
-  std::string selected_id;
-  std::string section = kSectionCapture;
   obs_data_t *settings = instance != nullptr && instance->source_ != nullptr
                              ? obs_source_get_settings(instance->source_)
                              : nullptr;
+
+#ifndef AUTO_CAPTURE_HAS_UI
+  // Enumerating every window on screen is not free, and with the settings
+  // window in charge nothing on this panel needs the result.
+  const std::vector<WindowOption> windows = CollectWindows();
+  const std::vector<ProcessOption> processes = CollectProcesses(windows);
+  std::string selected_id;
+  std::string section = kSectionCapture;
+#endif
+
   if (settings != nullptr) {
     bool rewrite = false;
     LoadRules(settings, rules, &rewrite);
     if (rewrite) {
       StoreRules(settings, rules);
     }
+#ifndef AUTO_CAPTURE_HAS_UI
     selected_id = obs_data_get_string(settings, kSelectedRuleSetting);
     if (FindRule(rules, selected_id) == nullptr) {
       selected_id = rules.empty() ? std::string() : rules.front().id;
@@ -1939,9 +1946,10 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
     if (Trim(obs_data_get_string(settings, kNewProcessSetting)).empty() && !processes.empty()) {
       obs_data_set_string(settings, kNewProcessSetting, processes.front().process_name.c_str());
     }
-    obs_data_set_string(settings, kStatusTextSetting, instance->GetStatusText().c_str());
     section = NormalizeSection(obs_data_get_string(settings, kUiSectionSetting));
     obs_data_set_string(settings, kUiSectionSetting, section.c_str());
+#endif
+    obs_data_set_string(settings, kStatusTextSetting, instance->GetStatusText().c_str());
   }
 
   obs_properties_t *properties = obs_properties_create();
@@ -1955,12 +1963,13 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
                              AutoCaptureSource::RefreshClicked, data);
 
 #ifdef AUTO_CAPTURE_HAS_UI
-  // The sections below stay where they are until the window can replace them.
-  // Removing them first would leave the plugin unconfigurable for anyone whose
-  // OBS cannot open the window.
+  // Everything else lives in the settings window. The properties panel is too
+  // narrow for two lists side by side, which is why the window exists.
   obs_properties_add_button2(properties, kOpenSettingsAction, Text("AutoAppCapture.Actions.Configure"),
                              AutoCaptureSource::OpenSettingsClicked, data);
-#endif
+#else
+  // Built without Qt or the frontend API: there is no window, so every setting
+  // has to stay reachable here.
 
   // --- Section selector ---------------------------------------------------
   obs_property_t *section_list = obs_properties_add_list(properties, kUiSectionSetting, Text("AutoAppCapture.Section"),
@@ -2113,6 +2122,7 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
                            advanced_group);
 
   ApplySectionVisibility(properties, section);
+#endif
 
   if (settings != nullptr) {
     obs_data_release(settings);
