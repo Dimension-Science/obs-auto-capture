@@ -62,18 +62,26 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
+      # The two paths below are resolved against different things: file sources
+      # are relative to the .iss, while /O is relative to the working directory.
+      # A relative /O put the installer one level above the checkout, where the
+      # upload step never saw it.
       - name: Package the installer
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "/DPayloadDir=..\release\obs-auto-capture" `
             "/DAppVersion=${{ steps.version.outputs.version }}" `
-            "/O..\artifacts" `
+            "/O${{ github.workspace }}\artifacts" `
             installer\obs-auto-capture.iss
 
       - name: Show what will be published
         shell: pwsh
-        run: Get-ChildItem artifacts | ForEach-Object { "{0}  {1:N0} bytes" -f $_.Name, $_.Length }
+        run: |
+          $files = Get-ChildItem artifacts
+          $files | ForEach-Object { "{0}  {1:N0} bytes" -f $_.Name, $_.Length }
+          # A release missing half its downloads is worse than a failed build.
+          if ($files.Count -lt 2) { throw "expected both a zip and an installer, found $($files.Count)" }
 
       - uses: actions/upload-artifact@v4
         with:
