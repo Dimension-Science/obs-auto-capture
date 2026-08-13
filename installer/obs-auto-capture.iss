@@ -18,7 +18,11 @@
 #define AppVersion "1.0.0"
 #define AppPublisher "geekfreak"
 #define PluginId "obs-auto-capture"
-#define PayloadDir "..\dist\obs-auto-capture"
+; Overridable so CI can package what it just built:
+;   ISCC.exe /DPayloadDir=..\release\obs-auto-capture installer\obs-auto-capture.iss
+#ifndef PayloadDir
+  #define PayloadDir "..\dist\obs-auto-capture"
+#endif
 
 [Setup]
 AppId={{9F2C1B7E-4A56-4E2D-9C31-8D6B0E7A5C14}
