@@ -1,0 +1,46 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # Configuring downloads the pinned OBS sources and prebuilt dependencies,
+      # then builds libobs from them. Caching that keeps later runs to minutes.
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-windows-x64-${{ hashFiles('buildspec.json') }}
+
+      - name: Configure
+        run: cmake --preset windows-ci-x64
+
+      - name: Build
+        run: cmake --build --preset windows-ci-x64
+
+      - name: Install
+        run: cmake --install build_x64 --config RelWithDebInfo --prefix release
+
+      # The layout under release/obs-auto-capture is what the installer packages:
+      # bin/64bit next to data/locale and data/shaders.
+      - name: Show packaged layout
+        shell: pwsh
+        run: Get-ChildItem release -Recurse -File | ForEach-Object { $_.FullName.Replace("$PWD\", "") }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: obs-auto-capture-windows-x64
+          path: release/

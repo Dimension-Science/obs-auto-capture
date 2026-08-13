@@ -1,0 +1,42 @@
+{
+    "dependencies": {
+        "obs-studio": {
+            "version": "30.0.0",
+            "baseUrl": "https://github.com/obsproject/obs-studio/archive/refs/tags",
+            "label": "OBS sources",
+            "hashes": {
+                "windows-x64": ""
+            }
+        },
+        "prebuilt": {
+            "version": "2023-11-03",
+            "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
+            "label": "Pre-Built obs-deps",
+            "hashes": {
+                "windows-x64": "d0825a6fb65822c993a3059edfba70d72d2e632ef74893588cf12b1f0d329ce6"
+            }
+        },
+        "qt6": {
+            "version": "2023-11-03",
+            "baseUrl": "https://github.com/obsproject/obs-deps/releases/download",
+            "label": "Pre-Built Qt6",
+            "hashes": {
+                "windows-x64": "bc57dedf76b47119a6dce0435a2f21b35b08c8f2948b1cb34a157320f77732d1"
+            },
+            "debugSymbols": {
+                "windows-x64": "fd8ecd1d8cd2ef049d9f4d7fb5c134f784836d6020758094855dfa98bd025036"
+            }
+        }
+    },
+    "platformConfig": {
+        "macos": {
+            "bundleId": "tv.dimensionscience.obs-auto-capture"
+        }
+    },
+    "name": "obs-auto-capture",
+    "displayName": "OBS Auto Capture",
+    "version": "1.0.0",
+    "author": "Dimension Science",
+    "website": "https://github.com/Dimension-Science/obs-auto-capture",
+    "email": "sanjar2801@gmail.com"
+}

@@ -1,26 +1,54 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.28...3.30)
 
-project(obs-auto-capture VERSION 1.0.0 LANGUAGES CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+project(${_name} VERSION ${_version})
 
-if(NOT WIN32)
-  message(FATAL_ERROR "obs-auto-capture currently supports Windows only.")
+if(NOT OS_WINDOWS)
+  message(FATAL_ERROR "obs-auto-capture supports Windows only: it is built on Win32 window management and UI Automation.")
 endif()
 
-find_package(libobs REQUIRED)
+# Reserved for the settings window. Nothing in the plugin needs Qt yet, and
+# every option left off is a dependency the plugin cannot break on.
+option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
+option(ENABLE_QT "Use Qt functionality" OFF)
 
-add_library(obs-auto-capture MODULE
-  src/plugin-main.cpp
-  src/auto-capture-source.cpp
-  src/auto-capture-source.hpp
-  src/address-bar-locator.cpp
-  src/address-bar-locator.hpp
+include(compilerconfig)
+include(defaults)
+include(helpers)
+
+add_library(${CMAKE_PROJECT_NAME} MODULE)
+
+find_package(libobs REQUIRED)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
+
+if(ENABLE_FRONTEND_API)
+  find_package(obs-frontend-api REQUIRED)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
+endif()
+
+if(ENABLE_QT)
+  find_package(Qt6 COMPONENTS Widgets Core)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+  set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON)
+endif()
+
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE
+    src/plugin-main.cpp
+    src/auto-capture-source.cpp
+    src/auto-capture-source.hpp
+    src/address-bar-locator.cpp
+    src/address-bar-locator.hpp
 )
 
-target_compile_definitions(obs-auto-capture
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+target_compile_features(${CMAKE_PROJECT_NAME} PRIVATE cxx_std_17)
+
+target_compile_definitions(
+  ${CMAKE_PROJECT_NAME}
   PRIVATE
     UNICODE
     _UNICODE
@@ -28,31 +56,15 @@ target_compile_definitions(obs-auto-capture
     WIN32_LEAN_AND_MEAN
 )
 
-if(MSVC)
-  # Source files are UTF-8; without this MSVC would mangle the localized
-  # strings that are compiled into the plugin.
-  target_compile_options(obs-auto-capture PRIVATE /utf-8)
-endif()
-
-target_include_directories(obs-auto-capture
+# dwmapi: the window rectangle the capture is aligned to.
+# ole32/oleaut32/uuid: UI Automation is a COM API.
+target_link_libraries(
+  ${CMAKE_PROJECT_NAME}
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_link_libraries(obs-auto-capture
-  PRIVATE
-    OBS::libobs
     dwmapi
     ole32
     oleaut32
     uuid
 )
 
-set_target_properties(obs-auto-capture PROPERTIES
-  PREFIX ""
-  OUTPUT_NAME "obs-auto-capture"
-)
-
-install(TARGETS obs-auto-capture RUNTIME DESTINATION obs-plugins/64bit LIBRARY DESTINATION obs-plugins/64bit)
-install(DIRECTORY data/locale DESTINATION data/obs-plugins/obs-auto-capture)
-install(DIRECTORY data/shaders DESTINATION data/obs-plugins/obs-auto-capture)
+set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

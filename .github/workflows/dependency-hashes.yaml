@@ -1,0 +1,45 @@
+name: Dependency hashes
+
+# The build system verifies every downloaded dependency against a SHA256 in
+# buildspec.json. GitHub does not publish the checksum of a tag archive, so this
+# job prints it instead of anyone downloading half a gigabyte by hand to find
+# out. Run it whenever the pinned OBS version changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      obs-version:
+        description: "OBS Studio tag to hash"
+        required: true
+        default: "30.0.0"
+      deps-version:
+        description: "obs-deps release to hash"
+        required: true
+        default: "2023-11-03"
+
+jobs:
+  hashes:
+    runs-on: windows-2022
+    steps:
+      - name: Hash the pinned dependencies
+        shell: pwsh
+        run: |
+          $obs = "${{ inputs.obs-version }}"
+          $deps = "${{ inputs.deps-version }}"
+          $targets = @(
+            @{ Name = "obs-studio $obs"; Url = "https://github.com/obsproject/obs-studio/archive/refs/tags/$obs.zip" },
+            @{ Name = "prebuilt $deps"; Url = "https://github.com/obsproject/obs-deps/releases/download/$deps/windows-deps-$deps-x64.zip" },
+            @{ Name = "qt6 $deps"; Url = "https://github.com/obsproject/obs-deps/releases/download/$deps/windows-deps-qt6-$deps-x64.zip" },
+            @{ Name = "qt6 debug $deps"; Url = "https://github.com/obsproject/obs-deps/releases/download/$deps/windows-deps-qt6-$deps-x64-dbgsym.zip" }
+          )
+          foreach ($t in $targets) {
+            $file = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileName($t.Url))
+            try {
+              Invoke-WebRequest -Uri $t.Url -OutFile $file -UseBasicParsing
+              $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+              "{0,-24} {1}" -f $t.Name, $hash
+              Remove-Item $file -Force
+            } catch {
+              "{0,-24} FAILED: {1}" -f $t.Name, $_.Exception.Message
+            }
+          }

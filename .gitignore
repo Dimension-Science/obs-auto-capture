@@ -6,6 +6,9 @@
 # Build output
 /build*/
 /out/
+/release/
+# Downloaded OBS sources and prebuilt dependencies, ~700 MB
+/.deps/
 *.obj
 *.pdb
 *.ilk
