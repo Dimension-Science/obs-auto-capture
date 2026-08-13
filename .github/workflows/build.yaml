@@ -28,6 +28,20 @@ jobs:
       - name: Configure
         run: cmake --preset windows-ci-x64
 
+      # Runs on failure too: when find_package cannot see libobs, the only thing
+      # worth knowing is what the nested OBS build actually installed and where.
+      - name: Show what the dependency setup produced
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .deps)) { "no .deps directory"; exit 0 }
+          "--- config files ---"
+          Get-ChildItem .deps -Recurse -Include "*Config.cmake", "*-config.cmake" -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName.Replace("$PWD\", "") }
+          "--- .deps top levels ---"
+          Get-ChildItem .deps -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName.Replace("$PWD\", "") } | Select-Object -First 60
+
       - name: Build
         run: cmake --build --preset windows-ci-x64
 
