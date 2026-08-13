@@ -20,6 +20,13 @@
 #ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
+; The Windows file version resource accepts numbers only, so a pre-release tag
+; like 1.0.0-rc1 keeps its suffix in the visible name and loses it here.
+#if Pos("-", AppVersion) > 0
+  #define NumericVersion Copy(AppVersion, 1, Pos("-", AppVersion) - 1)
+#else
+  #define NumericVersion AppVersion
+#endif
 #define AppPublisher "Dimension Science"
 #define PluginId "obs-auto-capture"
 ; Overridable so CI can package what it just built:
@@ -34,7 +41,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumericVersion}
 VersionInfoDescription={#AppName} plugin installer
 DefaultDirName={code:GetDefaultDir}
 AppendDefaultDirName=no
