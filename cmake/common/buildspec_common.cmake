@@ -54,7 +54,14 @@ function(_setup_obs_studio)
 
   if(OS_WINDOWS)
     set(_cmake_generator "${CMAKE_GENERATOR}")
-    set(_cmake_arch "-A ${arch},version=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+    # Local change to the vendored template: the SDK version is deliberately not
+    # appended here. With current CMake the whole "x64,version=..." string ends
+    # up in CMAKE_VS_PLATFORM_NAME of the nested OBS configure, which then pastes
+    # it into its own dependency URLs and into JSON member names:
+    #   windows-deps-2023-11-03-x64,version=10.0.26100.0.zip -> 404
+    #   string sub-command JSON member 'hashes windows-x64,version=...' not found
+    # The SDK is still pinned through CMAKE_SYSTEM_VERSION just below.
+    set(_cmake_arch "-A ${arch}")
     set(_cmake_extra "-DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION} -DCMAKE_ENABLE_SCRIPTING=OFF")
   elseif(OS_MACOS)
     set(_cmake_generator "Xcode")
