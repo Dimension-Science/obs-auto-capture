@@ -221,6 +221,13 @@ function(_check_dependencies)
       set(_obs_version ${version})
       set(_obs_destination "${destination}")
       list(APPEND CMAKE_PREFIX_PATH "${dependencies_dir}")
+      # Local change to the vendored template: OBS 30 installs its package
+      # configs as <deps>/cmake/<name>/<name>Config.cmake. find_package does not
+      # look inside <prefix>/cmake/<name>/, only at <prefix>/cmake/ itself, so
+      # from the <deps> prefix libobs is invisible. Adding <deps>/cmake as its
+      # own prefix makes the <prefix>/<name>/ rule match. Harmless on layouts
+      # that put the configs under lib/cmake instead.
+      list(APPEND CMAKE_PREFIX_PATH "${dependencies_dir}/cmake")
     endif()
 
     message(STATUS "Setting up ${label} (${arch}) - done")
