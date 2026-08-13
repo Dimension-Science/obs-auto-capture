@@ -1,141 +1,100 @@
-# OBS Auto Capture Plugin
+# OBS Auto Capture
 
-Нативный Windows-плагин для OBS Studio. Добавляется как источник и сам переключает захват на то приложение из вашего списка, которое сейчас открыто на экране.
+A Windows plugin for OBS Studio that captures whichever of your applications is
+in the foreground, switching between them on its own.
 
-## На чем написан проект
+Add one source, list the applications you care about, and stop rebuilding your
+scene every time you alt-tab between a game, a browser and a chat window.
 
-- Язык: `C++17`
-- Платформа: `Windows`
-- Сборка: `CMake`
-- Интеграция: `OBS Plugin API / libobs`
-- Работа с окнами и процессами: `Win32 API`
+[Русская версия](README.ru.md)
 
-## Что умеет
+## What it does
 
-- Источник OBS `Автозахват приложений` (`Auto App Capture`)
-- Внутренний захват через `Window Capture` и `Game Capture`, выбор автоматически или вручную для каждого правила
-- Автовыбор активного окна из списка приложений
-- Sticky-поведение: если пользователь ушел в окно, которого нет в списке, последний подходящий захват остается активным
-- Удержание захвата во время Alt+Tab
-- Нормализация до верхнего окна приложения, чтобы не цепляться к дочернему холсту
-- Диалог выбора приложения или окна с поиском, поддержкой DPI и изменяемым размером
-- Полное редактирование правила: название, включение, способ захвата, полноэкранный режим, фильтр по заголовку
-- Отражение изображения по списку заголовков страниц
-- Закрытие адресной строки матовым стеклом, пикселями или цветом — включается для каждого приложения отдельно, у браузеров сразу
-- Автоматическое определение адресной строки в Chrome, Edge и Firefox с запасной областью на случай неудачи
-- Блок состояния: что захватывается сейчас, каким способом, сколько правил включено
-- Локализация интерфейса RU/EN
+- **Follows the foreground application.** One source, a list of executables, and
+  the capture switches to whichever of them you are actually looking at.
+- **Picks the capture method for you.** Game capture where it works, window
+  capture otherwise, or forced either way per application.
+- **Stays put during alt-tab.** Switching to something that is not on the list
+  leaves the last matching capture on screen instead of dropping to black.
+- **Hides the browser address bar.** The plugin asks the browser where its
+  address bar is and covers it with frosted glass, pixels or a solid colour, so
+  the URL of what you are reading does not go out on stream.
+- **Mirrors the image** for windows whose title matches a word you listed.
 
-## Окно настроек
+Everything is configured in one window, with running applications on the left
+and tracked ones on the right.
 
-Кнопка «Настроить в отдельном окне...» в свойствах источника открывает отдельное окно с разделами слева. Сейчас разделы там пустые — идёт перенос настроек из панели свойств, и до его конца всё остаётся доступным в самих свойствах.
+## Requirements
 
-Окно правит копию настроек и применяет их по ОК или «Применить». Оно требует Qt и `obs-frontend-api`; если их нет, кнопка не появляется, а плагин работает как раньше.
+- Windows
+- OBS Studio 30.0 or newer, including 31.x and 32.x
 
-## Интерфейс источника
+One binary covers every supported version, because libobs only refuses a plugin
+that was built against a *newer* release than the one running it.
 
-Сверху всегда виден блок **Состояние** с кнопкой обновления, под ним — переключатель **Раздел**:
+## Installing
 
-| Раздел | Содержимое |
-| --- | --- |
-| Захват приложений | список правил с редактором выбранного и блок добавления нового |
-| Отражение изображения | зеркалирование по списку заголовков |
-| Блюр адресной строки | как определять строку, чем закрывать, запасная область |
-| Дополнительно | интервал опроса |
+Download the installer from [Releases](https://github.com/Dimension-Science/obs-auto-capture/releases)
+and run it. It finds OBS by itself and suggests the plugin folder in your user
+profile, which needs no administrator rights and survives OBS updates. If you
+run a portable OBS, point it at that folder instead and it will use the layout
+OBS expects there.
 
-Показывается только выбранный раздел; скрытые продолжают работать, видимость влияет лишь на отображение. Выбор запоминается в настройках источника (`ui_section`).
+The zip from the same page is for unpacking by hand.
 
-Настоящих вкладок в панели свойств OBS нет — группа свойств всегда рисуется как обычная рамка, поэтому разделы сделаны переключателем с управлением видимостью групп. Все свойства при этом создаются сразу: диалог пересобирает виджеты из существующего объекта свойств и не запрашивает у источника новый.
+The installer is not code signed, so Windows SmartScreen will warn about it.
 
-Текстовый формат правил в интерфейсе не используется.
+## Using it
 
-## Формат хранения
+Add the **Auto App Capture** source to a scene, open its properties and click
+**Open the settings window**.
 
-Правило сохраняется в `target_rules` структурой:
+- **Application capture** — move applications from the running list on the left
+  to the tracked list on the right. The panel underneath sets the name, capture
+  method, whether to switch for any window or only a fullscreen one, an optional
+  window title filter, and whether to hide the address bar for this application.
+- **Mirror the image** — a list of words; while the active window title contains
+  one of them the image is flipped horizontally.
+- **Address bar blur** — how to find the bar, what to cover it with, how strong,
+  and the fallback area.
+- **Advanced** — how often to check the foreground window.
 
-```json
-{
-  "id": "5dfd0a7636b3f955",
-  "name": "Chrome",
-  "process": "chrome.exe",
-  "mode": "auto | window | game",
-  "scope": "any | fullscreen",
-  "title": "",
-  "enabled": true,
-  "blur": true,
-  "value": "chrome.exe | auto | any | *"
-}
+### About the address bar blur
+
+The blur is a privacy feature, so it fails towards covering *more*, never less:
+
+- The address bar is located through UI Automation. While it has not been found
+  yet, if detection is unavailable, or if the captured frame no longer matches
+  the window, the **fallback area** is covered instead. The blur never silently
+  turns off.
+- Frosted glass is a mosaic with a smooth blend between cells, not a plain blur.
+  Text under it is destroyed rather than smeared, and cannot be sharpened back.
+- It is enabled per application. Browsers get it by default; everything else
+  does not, so a game or a chat window is never covered by accident.
+
+What it does **not** cover: tab titles, the link preview in the bottom-left
+corner, and the suggestion dropdown. Do not treat it as a guarantee that no URL
+can appear on stream.
+
+## Building
+
+The project uses the official OBS plugin template. You do not need an OBS
+checkout: configuring downloads the pinned OBS sources and prebuilt
+dependencies into `.deps`.
+
 ```
-
-Поле `blur` — закрывать ли адресную строку у этого приложения. Если ключа нет, ответ берётся из списка известных браузеров, поэтому правила, созданные до появления блюра, ведут себя правильно без ручных действий.
-
-Поле `value` пишется дополнительно, чтобы список понимала и предыдущая версия плагина. Оба старых формата (плоский текст `target_processes` и массив строк с ключами `rule_enabled_<hash>`) читаются и мигрируют без ручных действий.
-
-## Определение адресной строки
-
-Опрос идёт в отдельном потоке через UI Automation. Дерево обходится по уровням: вниз плагин идёт только по элементам верхней пятой части окна и никогда не заходит внутрь узла страницы, иначе браузер строит дерево доступности всего документа. Найденный элемент кэшируется, дальше читается только его прямоугольник.
-
-Адресная строка распознаётся по типу и геометрии: Edit в Chrome и Edge, ComboBox в Firefox, широкий и невысокий, в верхней части окна. По названию элемента совпадение не ищется — оно зависит от языка интерфейса браузера.
-
-Экранные координаты переводятся в кадр по той же рамке, от которой считает захват (`DWMWA_EXTENDED_FRAME_BOUNDS`). Если размер кадра не совпал ни с ней, ни с полным прямоугольником окна, координаты не применяются и закрывается запасная область.
-
-## Потоки
-
-`update` вызывается libobs в графическом потоке, поэтому он только читает объект настроек. Любая запись в настройки выполняется в колбэках свойств, то есть в UI-потоке. Состояние источника пишется и читается графическим потоком.
-
-Поток определения адресной строки — единственный фоновый. Он не трогает ни libobs, ни состояние источника: обменивается с ним только целевым окном и последним найденным прямоугольником через мьютекс внутри `AddressBarLocator`. Поток останавливается в деструкторе источника до освобождения остальных ресурсов.
-
-## Сборка
-
-Проект собирается официальным шаблоном плагинов OBS. Дерево OBS рядом с проектом держать не нужно: конфигурация сама скачивает исходники нужной версии и готовые зависимости в `.deps`.
-
-```text
 cmake --preset windows-x64
 cmake --build --preset windows-x64
 ```
 
-Нужны Visual Studio 2022 и CMake 3.28 или новее. Первая конфигурация долгая — она собирает libobs из исходников; дальше `.deps` переиспользуется.
+Visual Studio 2022 and CMake 3.28 or newer are required. The first configure is
+slow because it builds libobs.
 
-Версии зависимостей заданы в `buildspec.json`. Плагин собирается против **OBS 30.0.0** — самой старой поддерживаемой версии, и работает на всех, начиная с неё.
+`buildspec.json` pins the dependency versions. The plugin is built against the
+oldest supported OBS on purpose, so that one binary runs on every release above
+it. Two files under `cmake/` carry local changes to the template, both marked
+`Local change to the vendored template`.
 
-Так получается потому, что libobs отклоняет модуль только если тот собран против **более новой** версии ([`obs-module.c`](https://github.com/obsproject/obs-studio/blob/30.0.0/libobs/obs-module.c), проверка `ver > LIBOBS_API_VER`). Сборка против нижней границы даёт один бинарник для всех версий выше неё. Второй барьер — символы: функция, появившаяся позже, попадёт в таблицу импорта и модуль не загрузится на старой OBS. Поэтому сборка против нижней границы заодно и проверка.
+## Licence
 
-Ниже 30.0.0 опуститься не получилось: шаблон конфигурирует исходники OBS ключом `-DOBS_CMAKE_VERSION=3.0.0`, а в 29.1.3 новая система сборки только появилась и не имеет даже опции `ENABLE_FRONTEND`.
-
-Опции `ENABLE_QT` и `ENABLE_FRONTEND_API` выключены: плагину пока хватает libobs, Win32 и UI Automation.
-
-### Правки в шаблоне
-
-Файлы в `cmake/` взяты из шаблона OBS с двумя пометками `Local change to the vendored template`. Обе — про раскладку OBS 30 и поведение текущего CMake, обе описаны на месте. При обновлении шаблона их нужно перенести.
-
-### Сборка в CI
-
-`.github/workflows/build.yaml` собирает Windows x64 и выкладывает готовую раскладку плагина артефактом. `.github/workflows/dependency-hashes.yaml` запускается вручную и печатает контрольные суммы для `buildspec.json` — у архивов тегов GitHub их нигде не публикует.
-
-## Установщик
-
-`installer/obs-auto-capture.iss` собирается компилятором Inno Setup в `dist/obs-auto-capture-<версия>-setup.exe`:
-
-```text
-ISCC.exe installer\obs-auto-capture.iss
-```
-
-Inno Setup нужен только для сборки, готовый `.exe` самодостаточен. Язык интерфейса выбирается по системному, русский или английский.
-
-Стандартная страница выбора папки с подставленным путём и кнопкой «Обзор». Подставляется папка плагинов пользователя, потому что она не требует прав администратора и переживает обновления OBS. Для портативной OBS путь автоматически меняется на `<obs>\config\obs-studio\plugins`, так как в `%APPDATA%` она не смотрит.
-
-Если указать папку самой OBS Studio, установщик разложит файлы её раскладкой (`obs-plugins\64bit` и `data\obs-plugins\obs-auto-capture`) вместо своей. Различаются они по наличию `bin\64bit\obs64.exe` внутри. Если указана папка, не заканчивающаяся на `obs-auto-capture`, имя дописывается и показывается в поле — чтобы `bin` и `data` не рассыпались по чужому каталогу.
-
-OBS ищется цепочкой: `HKLM\SOFTWARE\OBS Studio` в обоих видах реестра, затем `DisplayIcon` из записи об удалении, затем стандартные пути в `Program Files`, затем ярлык в меню «Пуск». Документированный `InstallLocation` не используется: он часто пустой.
-
-Перед установкой проверяется, что файл плагина не занят запущенной OBS, и что в другом стандартном месте не осталось старой копии — две копии одного модуля OBS загружает обе.
-
-## Дистрибутив
-
-`dist/obs-auto-capture-<версия>-windows-x64.zip` содержит плагин, `install.cmd` / `uninstall.cmd` и инструкции. Установка идет в `%APPDATA%\obs-studio\plugins\obs-auto-capture`, обновление OBS ее не удаляет.
-
-## Что еще стоит улучшить дальше
-
-- Выбор конкретного окна одного процесса как постоянная часть правила
-- Более подробная диагностика несовместимых игр и защищенных окон
-- Живое обновление блока состояния без переоткрытия свойств
+GPL-2.0, matching libobs. See [LICENSE](LICENSE).
