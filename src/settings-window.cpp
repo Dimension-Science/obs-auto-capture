@@ -2,6 +2,7 @@
 
 #include "applications-page.hpp"
 #include "plugin-api.hpp"
+#include "settings-pages.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -9,7 +10,6 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QListWidget>
 #include <QPointer>
 #include <QPushButton>
@@ -39,7 +39,6 @@ public:
 
 private:
   void AddSection(const char *title_key, QWidget *page);
-  void AddPlaceholderSection(const char *title_key, const char *placeholder_key);
   void Apply();
   // The source can be removed from the scene while this window is open. Nothing
   // in libobs will tell a plain QDialog about it, so the weak reference is
@@ -52,6 +51,9 @@ private:
   QListWidget *nav_ = nullptr;
   QStackedWidget *pages_ = nullptr;
   ApplicationsPage *applications_ = nullptr;
+  MirrorPage *mirror_ = nullptr;
+  BlurPage *blur_ = nullptr;
+  AdvancedPage *advanced_ = nullptr;
 
 public:
   ~SettingsWindow() override;
@@ -80,8 +82,17 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   applications_->SetRules(capture_rules::Load(working_settings_));
   AddSection("AutoAppCapture.Section.Capture", applications_);
 
-  AddPlaceholderSection("AutoAppCapture.Section.Mirror", "AutoAppCapture.Window.Placeholder.Mirror");
-  AddPlaceholderSection("AutoAppCapture.Section.Blur", "AutoAppCapture.Window.Placeholder.Blur");
+  mirror_ = new MirrorPage(pages_);
+  mirror_->Load(working_settings_);
+  AddSection("AutoAppCapture.Section.Mirror", mirror_);
+
+  blur_ = new BlurPage(pages_);
+  blur_->Load(working_settings_);
+  AddSection("AutoAppCapture.Section.Blur", blur_);
+
+  advanced_ = new AdvancedPage(pages_);
+  advanced_->Load(working_settings_);
+  AddSection("AutoAppCapture.Section.Advanced", advanced_);
 
   connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);
   nav_->setCurrentRow(0);
@@ -125,18 +136,6 @@ void SettingsWindow::AddSection(const char *title_key, QWidget *page)
   pages_->addWidget(page);
 }
 
-void SettingsWindow::AddPlaceholderSection(const char *title_key, const char *placeholder_key)
-{
-  auto *page = new QWidget(pages_);
-  auto *layout = new QVBoxLayout(page);
-  auto *placeholder = new QLabel(Text(placeholder_key), page);
-  placeholder->setWordWrap(true);
-  placeholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-  layout->addWidget(placeholder);
-  layout->addStretch(1);
-  AddSection(title_key, page);
-}
-
 void SettingsWindow::Apply()
 {
   obs_source_t *source = obs_weak_source_get_source(weak_source_);
@@ -144,6 +143,9 @@ void SettingsWindow::Apply()
     return;
   }
   capture_rules::Store(working_settings_, applications_->Rules());
+  mirror_->Save(working_settings_);
+  blur_->Save(working_settings_);
+  advanced_->Save(working_settings_);
   obs_source_update(source, working_settings_);
   obs_source_release(source);
 }
