@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# Windows tooling refuses to parse these correctly with LF endings.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.iss text eol=crlf
+dist/*.txt text eol=crlf

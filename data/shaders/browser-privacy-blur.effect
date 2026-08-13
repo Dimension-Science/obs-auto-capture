@@ -1,0 +1,214 @@
+// Draws the captured frame and replaces the configured zones with an
+// unreadable version of themselves.
+//
+// The technique set mirrors the part of libobs' default.effect that a source
+// needs when it draws its own render target, so switching the blur on never
+// changes how the frame is converted between colour spaces. The colour helpers
+// are copied from libobs' color.effect: #include in an effect file resolves
+// only next to the file itself, and shipping a copy of the whole header would
+// go stale with every OBS update.
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float multiplier;
+
+// Zones are UV rectangles (left, top, right, bottom). Only the first
+// zone_count of them are used; the effect parser has no array support, so they
+// are passed one by one.
+uniform float4 zone0;
+uniform float4 zone1;
+uniform float4 zone2;
+uniform float4 zone3;
+uniform int zone_count;
+
+uniform float2 cell_size;  // Mosaic cell, in UV units.
+uniform int obscure_mode;  // 0 = frosted, 1 = mosaic, 2 = solid fill.
+uniform float4 fill_color;
+
+sampler_state def_sampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertInOut {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertInOut VSDefault(VertInOut vert_in)
+{
+	VertInOut vert_out;
+	vert_out.pos = mul(float4(vert_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = vert_in.uv;
+	return vert_out;
+}
+
+float srgb_nonlinear_to_linear_channel(float u)
+{
+	return (u <= 0.04045) ? (u / 12.92) : pow(mad(u, 1. / 1.055, .055 / 1.055), 2.4);
+}
+
+float3 srgb_nonlinear_to_linear(float3 v)
+{
+	return float3(srgb_nonlinear_to_linear_channel(v.r), srgb_nonlinear_to_linear_channel(v.g),
+		      srgb_nonlinear_to_linear_channel(v.b));
+}
+
+float3 rec709_to_rec2020(float3 v)
+{
+	float r = dot(v, float3(0.62740389593469903, 0.32928303837788370, 0.043313065687417225));
+	float g = dot(v, float3(0.069097289358232075, 0.91954039507545871, 0.011362315566309178));
+	float b = dot(v, float3(0.016391438875150280, 0.088013307877225749, 0.89559525324762401));
+	return float3(r, g, b);
+}
+
+float3 rec2020_to_rec709(float3 v)
+{
+	float r = dot(v, float3(1.6604910021084345, -0.58764113878854951, -0.072849863319884883));
+	float g = dot(v, float3(-0.12455047452159074, 1.1328998971259603, -0.0083494226043694768));
+	float b = dot(v, float3(-0.018150763354905303, -0.10057889800800739, 1.1187296613629127));
+	return float3(r, g, b);
+}
+
+float3 reinhard(float3 rgb)
+{
+	rgb /= rgb + float3(1., 1., 1.);
+	rgb = saturate(rgb);
+	rgb = pow(rgb, float3(1. / 2.4, 1. / 2.4, 1. / 2.4));
+	rgb = srgb_nonlinear_to_linear(rgb);
+	return rgb;
+}
+
+// step() instead of comparisons keeps the test branch-free and portable
+// between the D3D and OpenGL backends.
+float in_zone(float2 uv, float4 zone)
+{
+	float2 above = step(zone.xy, uv);
+	float2 below = step(uv, zone.zw);
+	return above.x * above.y * below.x * below.y;
+}
+
+float zone_hit(float2 uv)
+{
+	float hit = 0.0;
+	if (zone_count > 0)
+		hit = max(hit, in_zone(uv, zone0));
+	if (zone_count > 1)
+		hit = max(hit, in_zone(uv, zone1));
+	if (zone_count > 2)
+		hit = max(hit, in_zone(uv, zone2));
+	if (zone_count > 3)
+		hit = max(hit, in_zone(uv, zone3));
+	return hit;
+}
+
+// One cell collapses to the average of four taps: a single tap would flicker
+// as the page scrolls under the zone.
+float4 cell_value(float2 cell_index)
+{
+	float2 center = (cell_index + 0.5) * cell_size;
+	float2 quarter = cell_size * 0.25;
+	float4 sum = image.Sample(def_sampler, center + float2(-quarter.x, -quarter.y));
+	sum += image.Sample(def_sampler, center + float2(quarter.x, -quarter.y));
+	sum += image.Sample(def_sampler, center + float2(-quarter.x, quarter.y));
+	sum += image.Sample(def_sampler, center + float2(quarter.x, quarter.y));
+	return sum * 0.25;
+}
+
+float4 obscured_sample(float2 uv)
+{
+	if (obscure_mode == 2)
+		return fill_color;
+
+	float2 grid = uv / cell_size;
+	if (obscure_mode == 1)
+		return cell_value(floor(grid));
+
+	// Frosted look: the mosaic already destroyed the glyphs, the smooth blend
+	// between neighbouring cells only removes the hard block edges. Unlike a
+	// plain blur this cannot be sharpened back into readable text.
+	float2 base = floor(grid - 0.5);
+	float2 f = frac(grid - 0.5);
+	f = f * f * (3.0 - 2.0 * f);
+	float4 c00 = cell_value(base);
+	float4 c10 = cell_value(base + float2(1.0, 0.0));
+	float4 c01 = cell_value(base + float2(0.0, 1.0));
+	float4 c11 = cell_value(base + float2(1.0, 1.0));
+	return lerp(lerp(c00, c10, f.x), lerp(c01, c11, f.x), f.y);
+}
+
+float4 frame_sample(float2 uv)
+{
+	float4 rgba = image.Sample(def_sampler, uv);
+	if (zone_hit(uv) > 0.0)
+		rgba = obscured_sample(uv);
+	return rgba;
+}
+
+float4 PSDraw(VertInOut vert_in) : TARGET
+{
+	return frame_sample(vert_in.uv);
+}
+
+float4 PSDrawMultiply(VertInOut vert_in) : TARGET
+{
+	float4 rgba = frame_sample(vert_in.uv);
+	rgba.rgb *= multiplier;
+	return rgba;
+}
+
+float4 PSDrawTonemap(VertInOut vert_in) : TARGET
+{
+	float4 rgba = frame_sample(vert_in.uv);
+	rgba.rgb = rec709_to_rec2020(rgba.rgb);
+	rgba.rgb = reinhard(rgba.rgb);
+	rgba.rgb = rec2020_to_rec709(rgba.rgb);
+	return rgba;
+}
+
+float4 PSDrawMultiplyTonemap(VertInOut vert_in) : TARGET
+{
+	float4 rgba = frame_sample(vert_in.uv);
+	rgba.rgb *= multiplier;
+	rgba.rgb = rec709_to_rec2020(rgba.rgb);
+	rgba.rgb = reinhard(rgba.rgb);
+	rgba.rgb = rec2020_to_rec709(rgba.rgb);
+	return rgba;
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDraw(vert_in);
+	}
+}
+
+technique DrawMultiply
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawMultiply(vert_in);
+	}
+}
+
+technique DrawTonemap
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawTonemap(vert_in);
+	}
+}
+
+technique DrawMultiplyTonemap
+{
+	pass
+	{
+		vertex_shader = VSDefault(vert_in);
+		pixel_shader  = PSDrawMultiplyTonemap(vert_in);
+	}
+}

@@ -1,0 +1,30 @@
+# The OBS source tree and its archive live next to the project only as a local
+# build environment. They are 1.6 GB and must never enter the history.
+/obs-studio-*/
+/obs-studio-*.zip
+
+# Build output
+/build*/
+/out/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.backup
+
+# Distribution: the payload and the archives are build artifacts, the scripts
+# and the installer source are not.
+/dist/obs-auto-capture/
+/dist/_previous-install-backup/
+/dist/*.zip
+/dist/*-setup.exe
+
+# Local build helpers that hardcode absolute paths of one machine
+/run-*.cmd
+/check-*.cmd
+
+.vs/
+.vscode/
+CMakeUserPresets.json
