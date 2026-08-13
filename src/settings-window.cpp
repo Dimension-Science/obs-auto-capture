@@ -1,5 +1,8 @@
 #include "settings-window.hpp"
 
+#include "applications-page.hpp"
+#include "plugin-api.hpp"
+
 #include <obs-frontend-api.h>
 #include <obs-module.h>
 
@@ -35,7 +38,8 @@ public:
   const std::string &SourceUuid() const { return uuid_; }
 
 private:
-  void AddSection(const char *title_key, const char *placeholder_key);
+  void AddSection(const char *title_key, QWidget *page);
+  void AddPlaceholderSection(const char *title_key, const char *placeholder_key);
   void Apply();
   // The source can be removed from the scene while this window is open. Nothing
   // in libobs will tell a plain QDialog about it, so the weak reference is
@@ -47,6 +51,7 @@ private:
   obs_data_t *working_settings_ = nullptr;
   QListWidget *nav_ = nullptr;
   QStackedWidget *pages_ = nullptr;
+  ApplicationsPage *applications_ = nullptr;
 
 public:
   ~SettingsWindow() override;
@@ -71,9 +76,12 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
 
   pages_ = new QStackedWidget(this);
 
-  AddSection("AutoAppCapture.Section.Capture", "AutoAppCapture.Window.Placeholder.Capture");
-  AddSection("AutoAppCapture.Section.Mirror", "AutoAppCapture.Window.Placeholder.Mirror");
-  AddSection("AutoAppCapture.Section.Blur", "AutoAppCapture.Window.Placeholder.Blur");
+  applications_ = new ApplicationsPage(pages_);
+  applications_->SetRules(capture_rules::Load(working_settings_));
+  AddSection("AutoAppCapture.Section.Capture", applications_);
+
+  AddPlaceholderSection("AutoAppCapture.Section.Mirror", "AutoAppCapture.Window.Placeholder.Mirror");
+  AddPlaceholderSection("AutoAppCapture.Section.Blur", "AutoAppCapture.Window.Placeholder.Blur");
 
   connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);
   nav_->setCurrentRow(0);
@@ -111,10 +119,14 @@ SettingsWindow::~SettingsWindow()
   }
 }
 
-void SettingsWindow::AddSection(const char *title_key, const char *placeholder_key)
+void SettingsWindow::AddSection(const char *title_key, QWidget *page)
 {
   nav_->addItem(Text(title_key));
+  pages_->addWidget(page);
+}
 
+void SettingsWindow::AddPlaceholderSection(const char *title_key, const char *placeholder_key)
+{
   auto *page = new QWidget(pages_);
   auto *layout = new QVBoxLayout(page);
   auto *placeholder = new QLabel(Text(placeholder_key), page);
@@ -122,7 +134,7 @@ void SettingsWindow::AddSection(const char *title_key, const char *placeholder_k
   placeholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
   layout->addWidget(placeholder);
   layout->addStretch(1);
-  pages_->addWidget(page);
+  AddSection(title_key, page);
 }
 
 void SettingsWindow::Apply()
@@ -131,6 +143,7 @@ void SettingsWindow::Apply()
   if (source == nullptr) {
     return;
   }
+  capture_rules::Store(working_settings_, applications_->Rules());
   obs_source_update(source, working_settings_);
   obs_source_release(source);
 }

@@ -44,7 +44,15 @@ target_sources(
 )
 
 if(ENABLE_QT AND ENABLE_FRONTEND_API)
-  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/settings-window.cpp src/settings-window.hpp)
+  target_sources(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE
+      src/settings-window.cpp
+      src/settings-window.hpp
+      src/applications-page.cpp
+      src/applications-page.hpp
+      src/plugin-api.hpp
+  )
   target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE AUTO_CAPTURE_HAS_UI)
 endif()
 

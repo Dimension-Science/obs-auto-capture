@@ -1,5 +1,7 @@
 #include "auto-capture-source.hpp"
 
+#include "plugin-api.hpp"
+
 #ifdef AUTO_CAPTURE_HAS_UI
 #include "settings-window.hpp"
 #endif
@@ -2628,3 +2630,55 @@ obs_source_info auto_capture_source_info = [] {
   info.video_get_color_space = AutoCaptureSource::GetColorSpaceCallback;
   return info;
 }();
+
+// ---------------------------------------------------------------------------
+// Access for the settings window
+//
+// Wrappers, not a second implementation: the window must agree with the source
+// about the rule format, including both legacy migrations, or a list edited in
+// one place would come back wrong in the other.
+// ---------------------------------------------------------------------------
+
+namespace capture_rules {
+
+std::vector<AutoCaptureRule> Load(obs_data_t *settings)
+{
+  std::vector<AutoCaptureRule> rules;
+  LoadRules(settings, rules, nullptr);
+  return rules;
+}
+
+void Store(obs_data_t *settings, const std::vector<AutoCaptureRule> &rules)
+{
+  StoreRules(settings, rules);
+}
+
+std::string MakeId(const std::vector<AutoCaptureRule> &rules, const AutoCaptureRule &rule)
+{
+  return MakeUniqueRuleId(rules, rule);
+}
+
+std::string FriendlyName(const std::string &process_name)
+{
+  return FriendlyProcessName(process_name);
+}
+
+bool IsBrowser(const std::string &process_name)
+{
+  return IsBrowserProcess(process_name);
+}
+
+} // namespace capture_rules
+
+std::vector<RunningApp> CollectRunningApps()
+{
+  std::vector<RunningApp> apps;
+  for (const ProcessOption &option : CollectProcesses(CollectWindows())) {
+    RunningApp app;
+    app.process_name = option.process_name;
+    app.sample_title = option.sample_title;
+    app.window_count = option.window_count;
+    apps.push_back(std::move(app));
+  }
+  return apps;
+}
