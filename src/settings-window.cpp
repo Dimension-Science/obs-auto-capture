@@ -56,7 +56,6 @@ private:
   ApplicationsPage *applications_ = nullptr;
   MirrorPage *mirror_ = nullptr;
   BlurPage *blur_ = nullptr;
-  AdvancedPage *advanced_ = nullptr;
 
 public:
   ~SettingsWindow() override;
@@ -82,7 +81,7 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   pages_ = new QStackedWidget(this);
 
   applications_ = new ApplicationsPage(pages_);
-  applications_->SetRules(capture_rules::Load(working_settings_));
+  applications_->Load(working_settings_);
   AddSection("AutoAppCapture.Section.Capture", applications_);
 
   mirror_ = new MirrorPage(pages_);
@@ -92,10 +91,6 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   blur_ = new BlurPage(pages_);
   blur_->Load(working_settings_);
   AddSection("AutoAppCapture.Section.Blur", blur_);
-
-  advanced_ = new AdvancedPage(pages_);
-  advanced_->Load(working_settings_);
-  AddSection("AutoAppCapture.Section.Advanced", advanced_);
 
   connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);
   nav_->setCurrentRow(0);
@@ -160,10 +155,9 @@ void SettingsWindow::Apply()
   if (source == nullptr) {
     return;
   }
-  capture_rules::Store(working_settings_, applications_->Rules());
+  applications_->Save(working_settings_);
   mirror_->Save(working_settings_);
   blur_->Save(working_settings_);
-  advanced_->Save(working_settings_);
   obs_source_update(source, working_settings_);
   obs_source_release(source);
 }

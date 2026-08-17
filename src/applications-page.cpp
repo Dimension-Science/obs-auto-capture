@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -125,15 +126,35 @@ void ApplicationsPage::BuildUi()
   connect(mode_, &QComboBox::currentIndexChanged, this, commit);
   connect(scope_, &QComboBox::currentIndexChanged, this, commit);
 
+  poll_interval_ = new QDoubleSpinBox(this);
+  poll_interval_->setRange(0.1, 5.0);
+  poll_interval_->setSingleStep(0.1);
+  poll_interval_->setDecimals(1);
+  poll_interval_->setSuffix(Text("AutoAppCapture.PollInterval.Suffix"));
+  poll_interval_->setToolTip(Text("AutoAppCapture.PollInterval.Tooltip"));
+
+  auto *poll_row = new QHBoxLayout();
+  poll_row->addWidget(new QLabel(Text("AutoAppCapture.PollInterval"), this));
+  poll_row->addWidget(poll_interval_);
+  poll_row->addStretch(1);
+
   auto *layout = new QVBoxLayout(this);
   layout->addLayout(lists, 1);
   layout->addWidget(editor_);
+  layout->addLayout(poll_row);
 }
 
-void ApplicationsPage::SetRules(std::vector<AutoCaptureRule> rules)
+void ApplicationsPage::Load(obs_data_t *settings)
 {
-  rules_ = std::move(rules);
+  rules_ = capture_rules::Load(settings);
+  poll_interval_->setValue(obs_data_get_double(settings, "poll_interval_seconds"));
   ReloadTrackedList();
+}
+
+void ApplicationsPage::Save(obs_data_t *settings) const
+{
+  capture_rules::Store(settings, rules_);
+  obs_data_set_double(settings, "poll_interval_seconds", poll_interval_->value());
 }
 
 void ApplicationsPage::ReloadTrackedList()

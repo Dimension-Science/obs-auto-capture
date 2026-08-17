@@ -8,6 +8,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QGroupBox;
 class QLineEdit;
 class QListWidget;
@@ -22,8 +23,8 @@ class ApplicationsPage : public QWidget {
 public:
   explicit ApplicationsPage(QWidget *parent);
 
-  void SetRules(std::vector<AutoCaptureRule> rules);
-  const std::vector<AutoCaptureRule> &Rules() const { return rules_; }
+  void Load(obs_data_t *settings);
+  void Save(obs_data_t *settings) const;
 
 private:
   void BuildUi();
@@ -51,4 +52,8 @@ private:
   QComboBox *scope_ = nullptr;
   QLineEdit *title_ = nullptr;
   QCheckBox *blur_ = nullptr;
+
+  // How often the foreground window is checked. It belongs with the list of
+  // applications it switches between, not in a section of its own.
+  QDoubleSpinBox *poll_interval_ = nullptr;
 };

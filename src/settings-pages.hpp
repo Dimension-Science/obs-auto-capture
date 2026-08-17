@@ -58,13 +58,3 @@ private:
   unsigned int fill_color_ = 0xFF101010;
 };
 
-class AdvancedPage : public QWidget {
-public:
-  explicit AdvancedPage(QWidget *parent);
-
-  void Load(obs_data_t *settings);
-  void Save(obs_data_t *settings) const;
-
-private:
-  QDoubleSpinBox *poll_interval_ = nullptr;
-};
