@@ -46,6 +46,11 @@ VersionInfoDescription={#AppName} plugin installer
 DefaultDirName={code:GetDefaultDir}
 AppendDefaultDirName=no
 DirExistsWarning=no
+; Reinstalling normally reuses the folder of the previous install. Here that is
+; a trap: an install made by an earlier build sits in a folder OBS does not
+; scan, and silently upgrading in place would keep it there forever. The
+; location is computed from where OBS actually looks, so that wins.
+UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
 ; Picks Russian or English from the system language instead of opening with a
