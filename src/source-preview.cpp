@@ -11,12 +11,17 @@ SourcePreview::SourcePreview(obs_source_t *source, QWidget *parent) : QWidget(pa
 {
   weak_source_ = obs_source_get_weak_source(source);
 
+  // A source only produces a picture while something is showing it. The
+  // properties dialog of OBS does the same thing for its own preview; without
+  // it a source that is not in the active scene stays black.
+  obs_source_inc_showing(source);
+
   // A native window OBS can render into, with Qt kept away from the surface.
   setAttribute(Qt::WA_PaintOnScreen);
   setAttribute(Qt::WA_NativeWindow);
   setAttribute(Qt::WA_OpaquePaintEvent);
   setAttribute(Qt::WA_NoSystemBackground);
-  setMinimumHeight(180);
+  setMinimumHeight(260);
 }
 
 SourcePreview::~SourcePreview()
@@ -29,6 +34,10 @@ SourcePreview::~SourcePreview()
     display_ = nullptr;
   }
   if (weak_source_ != nullptr) {
+    if (obs_source_t *source = obs_weak_source_get_source(weak_source_)) {
+      obs_source_dec_showing(source);
+      obs_source_release(source);
+    }
     obs_weak_source_release(weak_source_);
     weak_source_ = nullptr;
   }

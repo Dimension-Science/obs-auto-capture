@@ -72,8 +72,8 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
 
   setAttribute(Qt::WA_DeleteOnClose);
   setWindowTitle(QString("%1 — %2").arg(Text("AutoAppCapture.Window.Title"), obs_source_get_name(source)));
-  resize(900, 600);
-  setMinimumSize(720, 460);
+  resize(1040, 860);
+  setMinimumSize(900, 720);
 
   nav_ = new QListWidget(this);
   nav_->setMaximumWidth(220);
@@ -111,9 +111,13 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   splitter->addWidget(preview);
   auto *below = new QWidget(splitter);
   below->setLayout(content);
+  // Without a floor the splitter happily squeezes the controls into a few
+  // pixels of scrollbar, which is what the first version did.
+  below->setMinimumHeight(400);
   splitter->addWidget(below);
-  splitter->setStretchFactor(0, 2);
-  splitter->setStretchFactor(1, 3);
+  splitter->setChildrenCollapsible(false);
+  splitter->setStretchFactor(0, 3);
+  splitter->setStretchFactor(1, 2);
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply,
                                        this);
