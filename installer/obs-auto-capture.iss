@@ -209,20 +209,31 @@ begin
                     FileExists(AddBackslash(ObsDir) + 'obs_portable_mode.txt'));
 end;
 
-// In portable mode OBS keeps its configuration next to the executable and never
-// looks in %APPDATA%, so the suggested folder has to move with it.
-function UserPluginDir(): String;
+// Where OBS looks for plugins outside its own folder on Windows. This is
+// ProgramData, not AppData: see AddExtraModulePaths in OBS, which calls
+// GetProgramDataPath for "obs-studio/plugins/%module%" and then appends
+// bin/64bit and data. AppData is the macOS and Linux location.
+function SharedPluginDir(): String;
 begin
-  EnsureObsDetected();
-  if ObsIsPortable then
-    Result := AddBackslash(ObsDir) + 'config\obs-studio\plugins\{#PluginId}'
-  else
-    Result := ExpandConstant('{userappdata}\obs-studio\plugins\{#PluginId}');
+  Result := ExpandConstant('{commonappdata}\obs-studio\plugins\{#PluginId}');
+end;
+
+// The path an older build of this installer used. Wrong on Windows, so any copy
+// left there is dead weight that has to go.
+function LegacyAppDataPluginDir(): String;
+begin
+  Result := ExpandConstant('{userappdata}\obs-studio\plugins\{#PluginId}');
 end;
 
 function GetDefaultDir(Param: String): String;
 begin
-  Result := UserPluginDir();
+  EnsureObsDetected();
+  // A portable OBS returns from AddExtraModulePaths before it ever reaches the
+  // shared folder, so its own directory is the only place that works.
+  if ObsIsPortable and (ObsDir <> '') then
+    Result := ObsDir
+  else
+    Result := SharedPluginDir();
 end;
 
 function TargetRoot(): String;
@@ -301,19 +312,27 @@ begin
             (MsgBox(FmtMessage(CustomMessage('RemoveOther'), [Where]), mbConfirmation, MB_YESNO) = IDYES);
 end;
 
-// Both standard locations are checked, not just "the other one": with a
-// hand-picked folder in the mix either of them can be the leftover.
+// Every place a copy could be sitting is checked, not just "the other one":
+// with a hand-picked folder in the mix any of them can be the leftover, and one
+// of them is a folder an older build of this installer used by mistake.
 procedure RemoveOtherInstallation();
 var
   TargetBin, OtherBin, OtherData: String;
+  Candidates: array[0..1] of String;
+  i: Integer;
 begin
   EnsureObsDetected();
   TargetBin := GetBinDir('');
 
-  OtherBin := AddBackslash(UserPluginDir()) + 'bin\64bit';
-  if not SameFolder(OtherBin, TargetBin) and FileExists(AddBackslash(OtherBin) + '{#PluginId}.dll') then
-    if ConfirmRemoval(UserPluginDir()) then
-      DelTree(UserPluginDir(), True, True, True);
+  Candidates[0] := SharedPluginDir();
+  Candidates[1] := LegacyAppDataPluginDir();
+  for i := 0 to 1 do
+  begin
+    OtherBin := AddBackslash(Candidates[i]) + 'bin\64bit';
+    if not SameFolder(OtherBin, TargetBin) and FileExists(AddBackslash(OtherBin) + '{#PluginId}.dll') then
+      if ConfirmRemoval(Candidates[i]) then
+        DelTree(Candidates[i], True, True, True);
+  end;
 
   if ObsDir <> '' then
   begin

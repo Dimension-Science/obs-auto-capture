@@ -21,8 +21,8 @@ scene every time you alt-tab between a game, a browser and a chat window.
   the URL of what you are reading does not go out on stream.
 - **Mirrors the image** for windows whose title matches a word you listed.
 
-Everything is configured in one window, with running applications on the left
-and tracked ones on the right.
+Everything is configured in one window with a live preview of the source, so you
+can see where the blur actually lands.
 
 ## Requirements
 
@@ -38,10 +38,10 @@ not merely that the module loads.
 ## Installing
 
 Download the installer from [Releases](https://github.com/Dimension-Science/obs-auto-capture/releases)
-and run it. It finds OBS by itself and suggests the plugin folder in your user
-profile, which needs no administrator rights and survives OBS updates. If you
-run a portable OBS, point it at that folder instead and it will use the layout
-OBS expects there.
+and run it. It finds OBS by itself and suggests
+`%ProgramData%\obs-studio\plugins`, which is where OBS looks for plugins on
+Windows and which survives OBS updates. A portable OBS only loads plugins from
+its own folder, and the installer suggests that instead when it detects one.
 
 The zip from the same page is for unpacking by hand.
 
@@ -49,18 +49,18 @@ The installer is not code signed, so Windows SmartScreen will warn about it.
 
 ## Using it
 
-Add the **Auto App Capture** source to a scene, open its properties and click
-**Open the settings window**.
+Add the **Auto App Capture** source to a scene and double click it. The settings
+window opens with a live preview on top and the sections below.
 
-- **Application capture** — move applications from the running list on the left
-  to the tracked list on the right. The panel underneath sets the name, capture
-  method, whether to switch for any window or only a fullscreen one, an optional
-  window title filter, and whether to hide the address bar for this application.
+- **Application capture** — the tracked applications, added with a button and
+  removed with another. The panel underneath sets the name, capture method,
+  whether to switch for any window or only a fullscreen one, an optional window
+  title filter, and whether to hide the address bar for this application. How
+  often the foreground window is checked is at the bottom.
 - **Mirror the image** — a list of words; while the active window title contains
   one of them the image is flipped horizontally.
 - **Address bar blur** — how to find the bar, what to cover it with, how strong,
   and the fallback area.
-- **Advanced** — how often to check the foreground window.
 
 ### About the address bar blur
 
