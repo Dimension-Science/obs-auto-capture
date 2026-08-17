@@ -30,7 +30,10 @@ and tracked ones on the right.
 - OBS Studio 30.0 or newer, including 31.x and 32.x
 
 One binary covers every supported version, because libobs only refuses a plugin
-that was built against a *newer* release than the one running it.
+that was built against a *newer* release than the one running it. Checked by
+running the built plugin on portable OBS 30.2.3 and 31.1.2 and on an installed
+32.1.2, each time confirming that the source is created and starts capturing,
+not merely that the module loads.
 
 ## Installing
 
