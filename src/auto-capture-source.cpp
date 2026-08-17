@@ -1963,10 +1963,13 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
                              AutoCaptureSource::RefreshClicked, data);
 
 #ifdef AUTO_CAPTURE_HAS_UI
-  // Everything else lives in the settings window. The properties panel is too
-  // narrow for two lists side by side, which is why the window exists.
+  // Everything else lives in the settings window, which replaces this dialog
+  // outright. The button stays as the way back if that hand-off ever fails.
   obs_properties_add_button2(properties, kOpenSettingsAction, Text("AutoAppCapture.Actions.Configure"),
                              AutoCaptureSource::OpenSettingsClicked, data);
+  if (instance != nullptr && instance->source_ != nullptr) {
+    auto_capture_replace_properties_with_window(instance->source_);
+  }
 #else
   // Built without Qt or the frontend API: there is no window, so every setting
   // has to stay reachable here.

@@ -4,6 +4,8 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -48,28 +50,17 @@ QString AppLabel(const RunningApp &app)
 ApplicationsPage::ApplicationsPage(QWidget *parent) : QWidget(parent)
 {
   BuildUi();
-  RefreshRunningApps();
 }
 
 void ApplicationsPage::BuildUi()
 {
-  search_ = new QLineEdit(this);
-  search_->setPlaceholderText(Text("AutoAppCapture.Window.Search"));
-  connect(search_, &QLineEdit::textChanged, this, [this] { RefreshRunningApps(); });
-
-  available_ = new QListWidget(this);
   tracked_ = new QListWidget(this);
 
-  add_ = new QPushButton("→", this);
-  remove_ = new QPushButton("←", this);
-  add_->setFixedWidth(44);
-  remove_->setFixedWidth(44);
-  add_->setToolTip(Text("AutoAppCapture.Window.Add.Tooltip"));
-  remove_->setToolTip(Text("AutoAppCapture.Window.Remove.Tooltip"));
+  add_ = new QPushButton(Text("AutoAppCapture.Window.AddApp"), this);
+  remove_ = new QPushButton(Text("AutoAppCapture.Window.RemoveApp"), this);
 
-  connect(add_, &QPushButton::clicked, this, [this] { AddSelectedApp(); });
+  connect(add_, &QPushButton::clicked, this, [this] { AddApplication(); });
   connect(remove_, &QPushButton::clicked, this, [this] { RemoveSelectedRule(); });
-  connect(available_, &QListWidget::itemDoubleClicked, this, [this] { AddSelectedApp(); });
   connect(tracked_, &QListWidget::currentRowChanged, this, [this] { ShowSelectedRule(); });
 
   // The checkbox in the list is the same "track this application" flag as in
@@ -87,25 +78,15 @@ void ApplicationsPage::BuildUi()
     }
   });
 
-  auto *middle = new QVBoxLayout();
-  middle->addStretch(1);
-  middle->addWidget(add_);
-  middle->addWidget(remove_);
-  middle->addStretch(1);
+  auto *buttons = new QHBoxLayout();
+  buttons->addWidget(add_);
+  buttons->addWidget(remove_);
+  buttons->addStretch(1);
 
-  auto *available_side = new QVBoxLayout();
-  available_side->addWidget(new QLabel(Text("AutoAppCapture.Window.Available"), this));
-  available_side->addWidget(search_);
-  available_side->addWidget(available_, 1);
-
-  auto *tracked_side = new QVBoxLayout();
-  tracked_side->addWidget(new QLabel(Text("AutoAppCapture.Window.Tracked"), this));
-  tracked_side->addWidget(tracked_, 1);
-
-  auto *lists = new QHBoxLayout();
-  lists->addLayout(available_side, 1);
-  lists->addLayout(middle);
-  lists->addLayout(tracked_side, 1);
+  auto *lists = new QVBoxLayout();
+  lists->addWidget(new QLabel(Text("AutoAppCapture.Window.Tracked"), this));
+  lists->addWidget(tracked_, 1);
+  lists->addLayout(buttons);
 
   enabled_ = new QCheckBox(Text("AutoAppCapture.Rule.Enabled"), this);
   name_ = new QLineEdit(this);
@@ -147,22 +128,6 @@ void ApplicationsPage::BuildUi()
   auto *layout = new QVBoxLayout(this);
   layout->addLayout(lists, 1);
   layout->addWidget(editor_);
-}
-
-void ApplicationsPage::RefreshRunningApps()
-{
-  running_ = CollectRunningApps();
-
-  const QString filter = search_ != nullptr ? search_->text().trimmed().toLower() : QString();
-  available_->clear();
-  for (const RunningApp &app : running_) {
-    const QString label = AppLabel(app);
-    if (!filter.isEmpty() && !label.toLower().contains(filter)) {
-      continue;
-    }
-    auto *item = new QListWidgetItem(label, available_);
-    item->setData(Qt::UserRole, QString::fromStdString(app.process_name));
-  }
 }
 
 void ApplicationsPage::SetRules(std::vector<AutoCaptureRule> rules)
@@ -253,13 +218,50 @@ void ApplicationsPage::CommitEditorToRule()
   }
 }
 
-void ApplicationsPage::AddSelectedApp()
+// The list of running programs lives in a dialog rather than permanently on the
+// page: it is only needed for the few seconds it takes to add something, and
+// the space it used is better spent on the preview.
+void ApplicationsPage::AddApplication()
 {
-  QListWidgetItem *item = available_->currentItem();
-  if (item == nullptr) {
+  QDialog dialog(this);
+  dialog.setWindowTitle(Text("AutoAppCapture.Window.AddApp.Title"));
+  dialog.resize(560, 420);
+
+  auto *search = new QLineEdit(&dialog);
+  search->setPlaceholderText(Text("AutoAppCapture.Window.Search"));
+  auto *list = new QListWidget(&dialog);
+
+  const std::vector<RunningApp> running = CollectRunningApps();
+  const auto fill = [&] {
+    const QString filter = search->text().trimmed().toLower();
+    list->clear();
+    for (const RunningApp &app : running) {
+      const QString label = AppLabel(app);
+      if (!filter.isEmpty() && !label.toLower().contains(filter)) {
+        continue;
+      }
+      auto *entry = new QListWidgetItem(label, list);
+      entry->setData(Qt::UserRole, QString::fromStdString(app.process_name));
+    }
+  };
+  fill();
+  connect(search, &QLineEdit::textChanged, &dialog, fill);
+
+  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+  connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  connect(list, &QListWidget::itemDoubleClicked, &dialog, &QDialog::accept);
+
+  auto *layout = new QVBoxLayout(&dialog);
+  layout->addWidget(search);
+  layout->addWidget(list, 1);
+  layout->addWidget(buttons);
+
+  if (dialog.exec() != QDialog::Accepted || list->currentItem() == nullptr) {
     return;
   }
-  const std::string process = item->data(Qt::UserRole).toString().toStdString();
+
+  const std::string process = list->currentItem()->data(Qt::UserRole).toString().toStdString();
   if (process.empty()) {
     return;
   }

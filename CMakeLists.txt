@@ -53,6 +53,8 @@ if(ENABLE_QT AND ENABLE_FRONTEND_API)
       src/applications-page.hpp
       src/settings-pages.cpp
       src/settings-pages.hpp
+      src/source-preview.cpp
+      src/source-preview.hpp
       src/plugin-api.hpp
   )
   target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE AUTO_CAPTURE_HAS_UI)

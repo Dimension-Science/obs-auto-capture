@@ -3,16 +3,19 @@
 #include "applications-page.hpp"
 #include "plugin-api.hpp"
 #include "settings-pages.hpp"
+#include "source-preview.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
 
+#include <QApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QListWidget>
 #include <QPointer>
 #include <QPushButton>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -101,6 +104,17 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   content->addWidget(nav_);
   content->addWidget(pages_, 1);
 
+  // The picture on top, the controls under it, the way the properties dialog
+  // does it. It also shows where the blur actually lands.
+  auto *preview = new SourcePreview(source, this);
+  auto *splitter = new QSplitter(Qt::Vertical, this);
+  splitter->addWidget(preview);
+  auto *below = new QWidget(splitter);
+  below->setLayout(content);
+  splitter->addWidget(below);
+  splitter->setStretchFactor(0, 2);
+  splitter->setStretchFactor(1, 3);
+
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply,
                                        this);
   connect(buttons, &QDialogButtonBox::accepted, this, [this] {
@@ -111,7 +125,7 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, [this] { Apply(); });
 
   auto *layout = new QVBoxLayout(this);
-  layout->addLayout(content, 1);
+  layout->addWidget(splitter, 1);
   layout->addWidget(buttons);
 
   auto *watchdog = new QTimer(this);
@@ -187,6 +201,35 @@ void auto_capture_open_settings(obs_source_t *source)
   auto *window = new SettingsWindow(source, main_window);
   g_windows[uuid] = window;
   window->show();
+}
+
+// Opening the properties dialog is the signal that the user wants to configure
+// this source, so the window takes over from there. The properties dialog is
+// found by its class name, which is internal to OBS: if that ever changes the
+// dialog simply stays open next to the window instead of anything breaking.
+void auto_capture_replace_properties_with_window(obs_source_t *source)
+{
+  if (source == nullptr) {
+    return;
+  }
+  obs_weak_source_t *weak = obs_source_get_weak_source(source);
+  if (weak == nullptr) {
+    return;
+  }
+
+  // Queued: the properties dialog is still being built when this is called.
+  QTimer::singleShot(0, qApp, [weak] {
+    for (QWidget *widget : QApplication::topLevelWidgets()) {
+      if (widget->isVisible() && qstrcmp(widget->metaObject()->className(), "OBSBasicProperties") == 0) {
+        widget->close();
+      }
+    }
+    if (obs_source_t *live = obs_weak_source_get_source(weak)) {
+      auto_capture_open_settings(live);
+      obs_source_release(live);
+    }
+    obs_weak_source_release(weak);
+  });
 }
 
 void auto_capture_close_settings_windows()

@@ -25,25 +25,20 @@ public:
   void SetRules(std::vector<AutoCaptureRule> rules);
   const std::vector<AutoCaptureRule> &Rules() const { return rules_; }
 
-  void RefreshRunningApps();
-
 private:
   void BuildUi();
   void ReloadTrackedList();
   void ShowSelectedRule();
   void CommitEditorToRule();
-  void AddSelectedApp();
+  void AddApplication();
   void RemoveSelectedRule();
   int SelectedRuleIndex() const;
 
   std::vector<AutoCaptureRule> rules_;
-  std::vector<RunningApp> running_;
   // Set while the editor widgets are being filled, so their change signals do
   // not write the value straight back into the rule they came from.
   bool loading_editor_ = false;
 
-  QLineEdit *search_ = nullptr;
-  QListWidget *available_ = nullptr;
   QListWidget *tracked_ = nullptr;
   QPushButton *add_ = nullptr;
   QPushButton *remove_ = nullptr;
