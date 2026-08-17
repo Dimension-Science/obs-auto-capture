@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question or suggest something
+    url: https://github.com/Dimension-Science/obs-auto-capture/issues/new
+    about: Anything that is not a malfunction. No log needed.

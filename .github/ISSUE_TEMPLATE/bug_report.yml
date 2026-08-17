@@ -1,0 +1,69 @@
+name: Something does not work
+description: The plugin does not load, does not switch, or the blur is wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The OBS log answers most of these on its own, so it is asked for first.
+
+  - type: textarea
+    id: log
+    attributes:
+      label: OBS log
+      description: >
+        In OBS: Help → Log Files → Upload Current Log File, then paste the link
+        here. If OBS will not start at all, attach the newest file from
+        %APPDATA%\obs-studio\logs instead.
+      placeholder: https://obsproject.com/logs/...
+    validations:
+      required: true
+
+  - type: input
+    id: obs-version
+    attributes:
+      label: OBS Studio version
+      placeholder: "32.1.2"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: The version you installed, from the release page.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install it
+      options:
+        - Installer (.exe)
+        - Zip, unpacked by hand
+        - Built from source
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What happens, and what you expected instead
+      description: >
+        If it is about the address bar blur, say which browser and whether the
+        status line in the settings window says the address bar was located.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      placeholder: |
+        1. Add the source
+        2. Add Chrome to the tracked list
+        3. ...
+    validations:
+      required: false
