@@ -121,6 +121,7 @@ public:
 private:
   void PollActiveWindow();
   void ClearActiveMatch();
+  void StopCapturing();
   bool EnsureCaptureSources();
   bool EnsureChildCaptureSource(obs_source_t **slot,
                                 const char *source_id,

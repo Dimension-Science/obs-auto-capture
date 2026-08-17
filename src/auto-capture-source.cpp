@@ -91,6 +91,9 @@ constexpr const char *kRulesEmptyHint = "rules_empty_hint";
 constexpr const char *kPickWindowAction = "pick_window";
 constexpr const char *kAddRuleAction = "add_rule";
 constexpr const char *kDeleteRuleAction = "delete_rule";
+// Deliberately a different key from kStatusTextSetting: this one is never
+// stored, so the info field falls back to showing the property description.
+constexpr const char *kStatusInfoProperty = "status_info";
 constexpr const char *kRefreshAction = "refresh_state";
 constexpr const char *kOpenSettingsAction = "open_settings";
 
@@ -1343,6 +1346,9 @@ void AutoCaptureSource::Update(obs_data_t *settings)
   }
   if (enabled_rule_count_ == 0 || active_rule_index_ == kInvalidRuleIndex) {
     ClearActiveMatch();
+    // The rule behind the running capture was switched off or deleted, so the
+    // capture it was feeding has to go with it.
+    StopCapturing();
   }
 
   PollActiveWindow();
@@ -1754,9 +1760,14 @@ bool AutoCaptureSource::RefreshClicked(obs_properties_t *props, obs_property_t *
   if (!instance || !instance->source_) {
     return false;
   }
+  // Updated in place rather than through the settings object: writing there
+  // would mark the source as changed and make the properties dialog ask whether
+  // to save on the way out.
+  if (obs_property_t *status = obs_properties_get(props, kStatusInfoProperty)) {
+    obs_property_set_description(status, instance->GetStatusText().c_str());
+  }
   obs_data_t *settings = obs_source_get_settings(instance->source_);
   if (settings != nullptr) {
-    obs_data_set_string(settings, kStatusTextSetting, instance->GetStatusText().c_str());
     std::vector<AutoCaptureRule> rules;
     LoadRules(settings, rules, nullptr);
     RefillRuleList(props, rules);
@@ -1949,13 +1960,19 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
     section = NormalizeSection(obs_data_get_string(settings, kUiSectionSetting));
     obs_data_set_string(settings, kUiSectionSetting, section.c_str());
 #endif
-    obs_data_set_string(settings, kStatusTextSetting, instance->GetStatusText().c_str());
   }
+
+  // The status is passed as the property description rather than written into
+  // the settings object. Writing there while the properties dialog is being
+  // built marks the source as changed, and the dialog then asks whether to save
+  // on the way out - which is what the user sees when the settings window
+  // replaces it.
+  const std::string status_text = instance != nullptr ? instance->GetStatusText() : std::string();
 
   obs_properties_t *properties = obs_properties_create();
 
   // --- Status -------------------------------------------------------------
-  obs_property_t *status = obs_properties_add_text(properties, kStatusTextSetting, Text("AutoAppCapture.Status"),
+  obs_property_t *status = obs_properties_add_text(properties, kStatusInfoProperty, status_text.c_str(),
                                                    OBS_TEXT_INFO);
   obs_property_text_set_info_type(status, rules.empty() ? OBS_TEXT_INFO_WARNING : OBS_TEXT_INFO_NORMAL);
   obs_property_text_set_info_word_wrap(status, true);
@@ -2274,6 +2291,19 @@ void AutoCaptureSource::ClearActiveMatch()
   active_window_title_.clear();
 }
 
+// Turning a rule off has to stop the capture it was feeding. Clearing the match
+// alone is not enough: SyncCaptureSources returns early without an active
+// window, so the child capture keeps its old target and the picture stays on
+// screen. That is the wanted behaviour during Alt+Tab, and the wrong one when
+// the user has just switched the application off.
+void AutoCaptureSource::StopCapturing()
+{
+  if (active_window_selector_.empty()) {
+    return;
+  }
+  UpdateCaptureTargets(std::string(), true);
+}
+
 bool AutoCaptureSource::EnsureCaptureSources()
 {
   bool ready = true;
@@ -2363,8 +2393,12 @@ void AutoCaptureSource::UpdateCaptureTargets(const std::string &window_selector,
     obs_data_release(game_settings);
   }
   active_window_selector_ = window_selector;
-  blog(LOG_INFO, "[obs-auto-capture] Retargeted internal captures to process=%s title=%s",
-       active_process_name_.c_str(), active_window_title_.c_str());
+  if (window_selector.empty()) {
+    blog(LOG_INFO, "[obs-auto-capture] Capture stopped: no enabled rule is driving it any more.");
+  } else {
+    blog(LOG_INFO, "[obs-auto-capture] Retargeted internal captures to process=%s title=%s",
+         active_process_name_.c_str(), active_window_title_.c_str());
+  }
 }
 
 obs_source_t *AutoCaptureSource::SelectRenderSource() const
