@@ -98,6 +98,11 @@ Type: filesandordirs; Name: "{code:GetDataDir}\locale"
 Type: filesandordirs; Name: "{code:GetDataDir}\shaders"
 Type: dirifempty; Name: "{code:GetDataDir}"
 Type: dirifempty; Name: "{code:GetBinDir}"
+; The intermediate bin folder and the plugin folder itself, or an empty shell is
+; left behind after uninstalling. Harmless in the OBS layout, where neither is
+; ever empty.
+Type: dirifempty; Name: "{app}\bin"
+Type: dirifempty; Name: "{app}"
 
 [Code]
 var
