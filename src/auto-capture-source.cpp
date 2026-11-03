@@ -48,6 +48,7 @@ constexpr const char *kNewTitleSetting = "new_rule_title";
 // Everything else.
 constexpr const char *kPollIntervalSetting = "poll_interval_seconds";
 constexpr const char *kStatusTextSetting = "status_text";
+constexpr const char *kFitToCanvasSetting = "fit_to_canvas";
 constexpr const char *kMirrorEnabledSetting = "mirror_enabled";
 constexpr const char *kMirrorTitleRulesSetting = "mirror_title_rules";
 
@@ -1331,6 +1332,7 @@ void AutoCaptureSource::Update(obs_data_t *settings)
     target_processes_.insert(rule.process_name);
   }
   mirror_enabled_ = mirror_enabled;
+  fit_to_canvas_ = obs_data_get_bool(settings, kFitToCanvasSetting);
   mirror_title_rules_ = std::move(mirror_rules);
   poll_interval_seconds_ = poll_interval;
   blur_ = blur;
@@ -1534,6 +1536,14 @@ size_t AutoCaptureSource::BuildBlurZones(BlurZone *zones, size_t capacity, uint3
     address_bar_status_ = AddressBarStatus::Idle;
   }
 
+  // A fullscreen browser has no address bar to hide, so the fallback strip
+  // would sit over the video for no reason. Auto detection above still applies:
+  // the floating bar that appears when the pointer touches the top edge does
+  // show a URL, and if it is on screen it has already been covered.
+  if (active_window_ != nullptr && IsWindowEffectivelyFullscreen(active_window_)) {
+    return 0;
+  }
+
   // Nothing was located, or the frame does not match the window any more.
   // Never return zero here: switching the blur off is the user's decision, not
   // a consequence of a failed lookup.
@@ -1644,12 +1654,42 @@ bool AutoCaptureSource::RenderObscured(obs_source_t *child)
   return true;
 }
 
+bool AutoCaptureSource::FitTargetSize(uint32_t *cx, uint32_t *cy) const
+{
+  if (!fit_to_canvas_) {
+    return false;
+  }
+  struct obs_video_info ovi = {};
+  if (!obs_get_video_info(&ovi) || ovi.base_width == 0 || ovi.base_height == 0) {
+    return false;
+  }
+  *cx = ovi.base_width;
+  *cy = ovi.base_height;
+  return true;
+}
+
 void AutoCaptureSource::VideoRenderCallback(void *data, gs_effect_t *effect)
 {
   auto *instance = static_cast<AutoCaptureSource *>(data);
   if (instance != nullptr) {
     obs_source_t *selected = instance->SelectRenderSource();
     if (selected != nullptr) {
+      // Scaling happens outside the mirror and outside the blur, so both keep
+      // working in the coordinates of the captured frame.
+      const uint32_t child_cx = obs_source_get_width(selected);
+      const uint32_t child_cy = obs_source_get_height(selected);
+      uint32_t target_cx = 0;
+      uint32_t target_cy = 0;
+      const bool fit = child_cx > 0 && child_cy > 0 && instance->FitTargetSize(&target_cx, &target_cy);
+      if (fit) {
+        const float scale = std::min(static_cast<float>(target_cx) / static_cast<float>(child_cx),
+                                     static_cast<float>(target_cy) / static_cast<float>(child_cy));
+        gs_matrix_push();
+        gs_matrix_translate3f((static_cast<float>(target_cx) - static_cast<float>(child_cx) * scale) * 0.5f,
+                              (static_cast<float>(target_cy) - static_cast<float>(child_cy) * scale) * 0.5f, 0.0f);
+        gs_matrix_scale3f(scale, scale, 1.0f);
+      }
+
       const bool mirror = instance->ShouldMirror();
       if (mirror) {
         gs_matrix_push();
@@ -1660,6 +1700,9 @@ void AutoCaptureSource::VideoRenderCallback(void *data, gs_effect_t *effect)
         obs_source_video_render(selected);
       }
       if (mirror) {
+        gs_matrix_pop();
+      }
+      if (fit) {
         gs_matrix_pop();
       }
     }
@@ -2187,6 +2230,7 @@ void AutoCaptureSource::GetDefaults(obs_data_t *settings)
   obs_data_set_default_double(settings, kPollIntervalSetting, 0.5);
   // Was enabled by default in earlier versions: sources that never touched the
   // checkbox rely on it, and nothing is mirrored until a title rule matches.
+  obs_data_set_default_bool(settings, kFitToCanvasSetting, false);
   obs_data_set_default_bool(settings, kMirrorEnabledSetting, true);
   obs_data_set_default_string(settings, kMirrorTitleRulesSetting, "");
   obs_data_set_default_bool(settings, kLegacyFullscreenOnlySetting, false);
@@ -2197,6 +2241,14 @@ uint32_t AutoCaptureSource::GetWidth(void *data)
   auto *instance = static_cast<AutoCaptureSource *>(data);
   if (!instance) {
     return 0;
+  }
+  // A constant size is the whole point of fitting: the scene item is sized once
+  // and does not jump when the capture switches to an application of another
+  // resolution.
+  uint32_t target_cx = 0;
+  uint32_t target_cy = 0;
+  if (instance->FitTargetSize(&target_cx, &target_cy)) {
+    return target_cx;
   }
   if (obs_source_t *selected = instance->SelectRenderSource()) {
     const uint32_t width = obs_source_get_width(selected);
@@ -2212,6 +2264,11 @@ uint32_t AutoCaptureSource::GetHeight(void *data)
   auto *instance = static_cast<AutoCaptureSource *>(data);
   if (!instance) {
     return 0;
+  }
+  uint32_t target_cx = 0;
+  uint32_t target_cy = 0;
+  if (instance->FitTargetSize(&target_cx, &target_cy)) {
+    return target_cy;
   }
   if (obs_source_t *selected = instance->SelectRenderSource()) {
     const uint32_t height = obs_source_get_height(selected);

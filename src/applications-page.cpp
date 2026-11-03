@@ -138,9 +138,13 @@ void ApplicationsPage::BuildUi()
   poll_row->addWidget(poll_interval_);
   poll_row->addStretch(1);
 
+  fit_to_canvas_ = new QCheckBox(Text("AutoAppCapture.FitToCanvas"), this);
+  fit_to_canvas_->setToolTip(Text("AutoAppCapture.FitToCanvas.Tooltip"));
+
   auto *layout = new QVBoxLayout(this);
   layout->addLayout(lists, 1);
   layout->addWidget(editor_);
+  layout->addWidget(fit_to_canvas_);
   layout->addLayout(poll_row);
 }
 
@@ -148,6 +152,7 @@ void ApplicationsPage::Load(obs_data_t *settings)
 {
   rules_ = capture_rules::Load(settings);
   poll_interval_->setValue(obs_data_get_double(settings, "poll_interval_seconds"));
+  fit_to_canvas_->setChecked(obs_data_get_bool(settings, "fit_to_canvas"));
   ReloadTrackedList();
 }
 
@@ -155,6 +160,7 @@ void ApplicationsPage::Save(obs_data_t *settings) const
 {
   capture_rules::Store(settings, rules_);
   obs_data_set_double(settings, "poll_interval_seconds", poll_interval_->value());
+  obs_data_set_bool(settings, "fit_to_canvas", fit_to_canvas_->isChecked());
 }
 
 void ApplicationsPage::ReloadTrackedList()

@@ -132,6 +132,10 @@ private:
   void UpdateCaptureTargets(const std::string &window_selector, bool force);
   obs_source_t *SelectRenderSource() const;
   void UpdateRenderBackend(obs_source_t *selected_source);
+  // The size the source reports while "fit to canvas" is on, so a 640x480 game
+  // and a 1920x1080 browser both arrive as the same sized item and the scene
+  // transform stays put when the capture switches.
+  bool FitTargetSize(uint32_t *cx, uint32_t *cy) const;
   bool EnsureBlurEffect();
   void ReleaseBlurResources();
   bool BlurAppliesToActiveRule() const;
@@ -173,6 +177,7 @@ private:
   std::string status_text_;
   std::vector<std::string> mirror_title_rules_;
   bool mirror_enabled_ = true;
+  bool fit_to_canvas_ = false;
   uint32_t last_width_ = 1280;
   uint32_t last_height_ = 720;
 
