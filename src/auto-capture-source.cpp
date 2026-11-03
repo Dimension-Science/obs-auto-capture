@@ -344,6 +344,36 @@ bool IsWindowEffectivelyFullscreen(HWND hwnd)
          window_rect.right >= monitor_rect.right && window_rect.bottom >= monitor_rect.bottom;
 }
 
+// Stricter than the above on purpose, because this one switches a privacy cover
+// off rather than deciding which window to capture. Two differences: it
+// measures the visible frame instead of GetWindowRect, whose invisible resize
+// border already reaches past the monitor on a merely maximized window, and it
+// refuses to answer when the monitor reserves no taskbar area - there a
+// maximized window covers the monitor exactly like a fullscreen one and nothing
+// in the geometry separates them. Refusing keeps the cover on, which is the
+// safe way to be wrong.
+bool IsCertainlyFullscreen(HWND hwnd)
+{
+  HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+  if (!monitor) {
+    return false;
+  }
+  MONITORINFO info = {};
+  info.cbSize = sizeof(info);
+  if (!GetMonitorInfoW(monitor, &info)) {
+    return false;
+  }
+  if (EqualRect(&info.rcMonitor, &info.rcWork)) {
+    return false;
+  }
+  RECT bounds = {};
+  if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds)))) {
+    return false;
+  }
+  return bounds.left <= info.rcMonitor.left && bounds.top <= info.rcMonitor.top &&
+         bounds.right >= info.rcMonitor.right && bounds.bottom >= info.rcMonitor.bottom;
+}
+
 bool IsCandidateWindowForPicker(HWND hwnd)
 {
   if (!IsWindow(hwnd)) {
@@ -1532,16 +1562,18 @@ size_t AutoCaptureSource::BuildBlurZones(BlurZone *zones, size_t capacity, uint3
       zones[0] = zone;
       return 1;
     }
+    // A fullscreen browser has no address bar to hide, so the fallback strip
+    // would sit over the video for nothing. Detection above still applies: the
+    // floating bar Chrome shows when the pointer touches the top edge does
+    // carry a URL, and it has already been covered if it is on screen.
+    //
+    // Only while detection is in charge. A hand-drawn zone is the user's own
+    // decision about what to cover, and nothing here knows better than they do.
+    if (active_window_ != nullptr && IsCertainlyFullscreen(active_window_)) {
+      return 0;
+    }
   } else {
     address_bar_status_ = AddressBarStatus::Idle;
-  }
-
-  // A fullscreen browser has no address bar to hide, so the fallback strip
-  // would sit over the video for no reason. Auto detection above still applies:
-  // the floating bar that appears when the pointer touches the top edge does
-  // show a URL, and if it is on screen it has already been covered.
-  if (active_window_ != nullptr && IsWindowEffectivelyFullscreen(active_window_)) {
-    return 0;
   }
 
   // Nothing was located, or the frame does not match the window any more.
@@ -2177,6 +2209,8 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
 
   // --- Advanced -----------------------------------------------------------
   obs_properties_t *advanced_group = obs_properties_create();
+  obs_property_t *fit = obs_properties_add_bool(advanced_group, kFitToCanvasSetting, Text("AutoAppCapture.FitToCanvas"));
+  obs_property_set_long_description(fit, Text("AutoAppCapture.FitToCanvas.Tooltip"));
   obs_property_t *interval = obs_properties_add_float_slider(advanced_group, kPollIntervalSetting,
                                                              Text("AutoAppCapture.PollInterval"), 0.1, 5.0, 0.1);
   obs_property_float_set_suffix(interval, Text("AutoAppCapture.PollInterval.Suffix"));
@@ -2228,9 +2262,9 @@ void AutoCaptureSource::GetDefaults(obs_data_t *settings)
 
   obs_data_set_default_string(settings, kStatusTextSetting, Text("AutoAppCapture.Status.Empty"));
   obs_data_set_default_double(settings, kPollIntervalSetting, 0.5);
+  obs_data_set_default_bool(settings, kFitToCanvasSetting, false);
   // Was enabled by default in earlier versions: sources that never touched the
   // checkbox rely on it, and nothing is mirrored until a title rule matches.
-  obs_data_set_default_bool(settings, kFitToCanvasSetting, false);
   obs_data_set_default_bool(settings, kMirrorEnabledSetting, true);
   obs_data_set_default_string(settings, kMirrorTitleRulesSetting, "");
   obs_data_set_default_bool(settings, kLegacyFullscreenOnlySetting, false);

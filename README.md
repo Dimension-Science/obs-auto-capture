@@ -55,8 +55,9 @@ window opens with a live preview on top and the sections below.
 - **Application capture** — the tracked applications, added with a button and
   removed with another. The panel underneath sets the name, capture method,
   whether to switch for any window or only a fullscreen one, an optional window
-  title filter, and whether to hide the address bar for this application. How
-  often the foreground window is checked is at the bottom.
+  title filter, and whether to hide the address bar for this application. At the
+  bottom: whether to fit the picture into the canvas size, and how often the
+  foreground window is checked.
 - **Mirror the image** — a list of words; while the active window title contains
   one of them the image is flipped horizontally.
 - **Address bar blur** — how to find the bar, what to cover it with, how strong,
@@ -68,8 +69,13 @@ The blur is a privacy feature, so it fails towards covering *more*, never less:
 
 - The address bar is located through UI Automation. While it has not been found
   yet, if detection is unavailable, or if the captured frame no longer matches
-  the window, the **fallback area** is covered instead. The blur never silently
-  turns off.
+  the window, the **fallback area** is covered instead.
+- The one case where nothing is covered is a browser in fullscreen, where there
+  is no address bar to hide. Detection keeps running there, so the floating bar
+  that appears when the pointer touches the top edge is still covered. A window
+  that merely looks fullscreen, such as a maximized one on a screen with no
+  visible taskbar, keeps the fallback area: when the two cannot be told apart,
+  the cover stays on.
 - Frosted glass is a mosaic with a smooth blend between cells, not a plain blur.
   Text under it is destroyed rather than smeared, and cannot be sharpened back.
 - It is enabled per application. Browsers get it by default; everything else
