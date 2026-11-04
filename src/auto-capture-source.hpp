@@ -136,6 +136,10 @@ private:
   // and a 1920x1080 browser both arrive as the same sized item and the scene
   // transform stays put when the capture switches.
   bool FitTargetSize(uint32_t *cx, uint32_t *cy) const;
+  // Draws the frame through one of the scaling effects OBS ships. Only reached
+  // while fitting is on: without it the frame is drawn straight and the scene
+  // item's own scale filter still applies.
+  bool RenderFitted(obs_source_t *child, uint32_t cx, uint32_t cy, float scale);
   bool EnsureBlurEffect();
   void ReleaseBlurResources();
   bool BlurAppliesToActiveRule() const;
@@ -178,6 +182,7 @@ private:
   std::vector<std::string> mirror_title_rules_;
   bool mirror_enabled_ = true;
   bool fit_to_canvas_ = false;
+  enum obs_scale_type scale_filter_ = OBS_SCALE_BILINEAR;
   uint32_t last_width_ = 1280;
   uint32_t last_height_ = 720;
 
@@ -186,6 +191,9 @@ private:
   mutable AddressBarStatus address_bar_status_ = AddressBarStatus::Idle;
   gs_effect_t *blur_effect_ = nullptr;
   gs_texrender_t *blur_texrender_ = nullptr;
+  gs_texrender_t *fit_texrender_ = nullptr;
+  // libobs keeps a point sampler of its own, but not one a plugin can reach.
+  gs_samplerstate_t *point_sampler_ = nullptr;
   // Set after a failed load so a broken or missing effect file is reported
   // once instead of on every frame.
   bool blur_effect_failed_ = false;

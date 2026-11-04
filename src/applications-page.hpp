@@ -57,4 +57,5 @@ private:
   // applications it switches between, not in a section of its own.
   QDoubleSpinBox *poll_interval_ = nullptr;
   QCheckBox *fit_to_canvas_ = nullptr;
+  QComboBox *scale_filter_ = nullptr;
 };

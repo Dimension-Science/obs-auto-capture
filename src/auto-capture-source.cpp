@@ -49,6 +49,11 @@ constexpr const char *kNewTitleSetting = "new_rule_title";
 constexpr const char *kPollIntervalSetting = "poll_interval_seconds";
 constexpr const char *kStatusTextSetting = "status_text";
 constexpr const char *kFitToCanvasSetting = "fit_to_canvas";
+constexpr const char *kScaleFilterSetting = "scale_filter";
+constexpr const char *kScaleFilterBilinear = "bilinear";
+constexpr const char *kScaleFilterPoint = "point";
+constexpr const char *kScaleFilterBicubic = "bicubic";
+constexpr const char *kScaleFilterLanczos = "lanczos";
 constexpr const char *kMirrorEnabledSetting = "mirror_enabled";
 constexpr const char *kMirrorTitleRulesSetting = "mirror_title_rules";
 
@@ -1132,6 +1137,23 @@ std::string NormalizeSection(const std::string &value)
   return kSectionCapture;
 }
 
+// Only the filters worth offering for a captured window: point for pixel art,
+// bicubic and lanczos for everything else. Area is left out because it needs
+// the separate upscale techniques to behave, and nothing here benefits.
+enum obs_scale_type ParseScaleFilter(const std::string &value)
+{
+  if (value == kScaleFilterPoint) {
+    return OBS_SCALE_POINT;
+  }
+  if (value == kScaleFilterBicubic) {
+    return OBS_SCALE_BICUBIC;
+  }
+  if (value == kScaleFilterLanczos) {
+    return OBS_SCALE_LANCZOS;
+  }
+  return OBS_SCALE_BILINEAR;
+}
+
 BlurMode ParseBlurMode(const std::string &value)
 {
   if (value == kBlurModeMosaic) {
@@ -1363,6 +1385,7 @@ void AutoCaptureSource::Update(obs_data_t *settings)
   }
   mirror_enabled_ = mirror_enabled;
   fit_to_canvas_ = obs_data_get_bool(settings, kFitToCanvasSetting);
+  scale_filter_ = ParseScaleFilter(obs_data_get_string(settings, kScaleFilterSetting));
   mirror_title_rules_ = std::move(mirror_rules);
   poll_interval_seconds_ = poll_interval;
   blur_ = blur;
@@ -1458,7 +1481,8 @@ bool AutoCaptureSource::EnsureBlurEffect()
 
 void AutoCaptureSource::ReleaseBlurResources()
 {
-  if (blur_effect_ == nullptr && blur_texrender_ == nullptr) {
+  if (blur_effect_ == nullptr && blur_texrender_ == nullptr && fit_texrender_ == nullptr &&
+      point_sampler_ == nullptr) {
     return;
   }
   // The graphics context is recursive, so this is also safe when the source is
@@ -1467,6 +1491,14 @@ void AutoCaptureSource::ReleaseBlurResources()
   if (blur_texrender_ != nullptr) {
     gs_texrender_destroy(blur_texrender_);
     blur_texrender_ = nullptr;
+  }
+  if (fit_texrender_ != nullptr) {
+    gs_texrender_destroy(fit_texrender_);
+    fit_texrender_ = nullptr;
+  }
+  if (point_sampler_ != nullptr) {
+    gs_samplerstate_destroy(point_sampler_);
+    point_sampler_ = nullptr;
   }
   if (blur_effect_ != nullptr) {
     gs_effect_destroy(blur_effect_);
@@ -1700,6 +1732,105 @@ bool AutoCaptureSource::FitTargetSize(uint32_t *cx, uint32_t *cy) const
   return true;
 }
 
+// Same recipe libobs uses for a scene item's scale filter: the frame goes into
+// a texture and is drawn through one of the scaling effects, which need the
+// source dimensions to place their taps. Returns false when it could not be
+// done, and the caller draws the frame the plain way.
+bool AutoCaptureSource::RenderFitted(obs_source_t *child, uint32_t cx, uint32_t cy, float scale)
+{
+  if (scale_filter_ == OBS_SCALE_BILINEAR || cx == 0 || cy == 0) {
+    return false;
+  }
+
+  const enum gs_color_space preferred_spaces[] = {GS_CS_SRGB, GS_CS_SRGB_16F, GS_CS_709_EXTENDED};
+  const enum gs_color_space space =
+      obs_source_get_color_space(child, OBS_COUNTOF(preferred_spaces), preferred_spaces);
+  const enum gs_color_format format = gs_get_format_from_space(space);
+
+  if (fit_texrender_ != nullptr && gs_texrender_get_format(fit_texrender_) != format) {
+    gs_texrender_destroy(fit_texrender_);
+    fit_texrender_ = nullptr;
+  }
+  if (fit_texrender_ == nullptr) {
+    fit_texrender_ = gs_texrender_create(format, GS_ZS_NONE);
+    if (fit_texrender_ == nullptr) {
+      return false;
+    }
+  }
+  gs_texrender_reset(fit_texrender_);
+
+  gs_blend_state_push();
+  gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+  const bool captured = gs_texrender_begin_with_color_space(fit_texrender_, cx, cy, space);
+  if (captured) {
+    struct vec4 clear_color;
+    vec4_zero(&clear_color);
+    gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
+    gs_ortho(0.0f, static_cast<float>(cx), 0.0f, static_cast<float>(cy), -100.0f, 100.0f);
+    obs_source_video_render(child);
+    gs_texrender_end(fit_texrender_);
+  }
+  gs_blend_state_pop();
+  if (!captured) {
+    return false;
+  }
+
+  gs_texture_t *texture = gs_texrender_get_texture(fit_texrender_);
+  if (texture == nullptr) {
+    return false;
+  }
+
+  float multiplier = 1.0f;
+  const char *technique = BlurTechniqueName(gs_get_color_space(), space, &multiplier);
+
+  gs_effect_t *scale_effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+  if (scale_filter_ == OBS_SCALE_POINT) {
+    if (point_sampler_ == nullptr) {
+      struct gs_sampler_info info = {};
+      info.filter = GS_FILTER_POINT;
+      info.address_u = GS_ADDRESS_CLAMP;
+      info.address_v = GS_ADDRESS_CLAMP;
+      info.address_w = GS_ADDRESS_CLAMP;
+      info.max_anisotropy = 1;
+      point_sampler_ = gs_samplerstate_create(&info);
+    }
+    if (point_sampler_ == nullptr) {
+      return false;
+    }
+    gs_effect_set_next_sampler(gs_effect_get_param_by_name(scale_effect, "image"), point_sampler_);
+  } else if (scale < 0.5f) {
+    // The multi-tap filters give up below half size; libobs switches here too.
+    scale_effect = obs_get_base_effect(OBS_EFFECT_BILINEAR_LOWRES);
+  } else if (scale_filter_ == OBS_SCALE_BICUBIC) {
+    scale_effect = obs_get_base_effect(OBS_EFFECT_BICUBIC);
+  } else if (scale_filter_ == OBS_SCALE_LANCZOS) {
+    scale_effect = obs_get_base_effect(OBS_EFFECT_LANCZOS);
+  }
+
+  if (gs_eparam_t *base = gs_effect_get_param_by_name(scale_effect, "base_dimension")) {
+    struct vec2 size;
+    vec2_set(&size, static_cast<float>(cx), static_cast<float>(cy));
+    gs_effect_set_vec2(base, &size);
+  }
+  if (gs_eparam_t *base_i = gs_effect_get_param_by_name(scale_effect, "base_dimension_i")) {
+    struct vec2 size_i;
+    vec2_set(&size_i, 1.0f / static_cast<float>(cx), 1.0f / static_cast<float>(cy));
+    gs_effect_set_vec2(base_i, &size_i);
+  }
+  gs_effect_set_texture_srgb(gs_effect_get_param_by_name(scale_effect, "image"), texture);
+  if (gs_eparam_t *mul = gs_effect_get_param_by_name(scale_effect, "multiplier")) {
+    gs_effect_set_float(mul, multiplier);
+  }
+
+  const bool previous_srgb = gs_framebuffer_srgb_enabled();
+  gs_enable_framebuffer_srgb(true);
+  while (gs_effect_loop(scale_effect, technique)) {
+    gs_draw_sprite(texture, 0, cx, cy);
+  }
+  gs_enable_framebuffer_srgb(previous_srgb);
+  return true;
+}
+
 void AutoCaptureSource::VideoRenderCallback(void *data, gs_effect_t *effect)
 {
   auto *instance = static_cast<AutoCaptureSource *>(data);
@@ -1713,9 +1844,10 @@ void AutoCaptureSource::VideoRenderCallback(void *data, gs_effect_t *effect)
       uint32_t target_cx = 0;
       uint32_t target_cy = 0;
       const bool fit = child_cx > 0 && child_cy > 0 && instance->FitTargetSize(&target_cx, &target_cy);
+      float scale = 1.0f;
       if (fit) {
-        const float scale = std::min(static_cast<float>(target_cx) / static_cast<float>(child_cx),
-                                     static_cast<float>(target_cy) / static_cast<float>(child_cy));
+        scale = std::min(static_cast<float>(target_cx) / static_cast<float>(child_cx),
+                         static_cast<float>(target_cy) / static_cast<float>(child_cy));
         gs_matrix_push();
         gs_matrix_translate3f((static_cast<float>(target_cx) - static_cast<float>(child_cx) * scale) * 0.5f,
                               (static_cast<float>(target_cy) - static_cast<float>(child_cy) * scale) * 0.5f, 0.0f);
@@ -1728,8 +1860,14 @@ void AutoCaptureSource::VideoRenderCallback(void *data, gs_effect_t *effect)
         gs_matrix_scale3f(-1.0f, 1.0f, 1.0f);
         gs_matrix_translate3f(-static_cast<float>(obs_source_get_width(selected)), 0.0f, 0.0f);
       }
+      // The chosen filter only matters while the source does the scaling. With
+      // the blur covering something the frame already goes through its own
+      // effect, and with fitting off the scene item's own scale filter applies
+      // as it always did.
       if (!instance->RenderObscured(selected)) {
-        obs_source_video_render(selected);
+        if (!fit || !instance->RenderFitted(selected, child_cx, child_cy, scale)) {
+          obs_source_video_render(selected);
+        }
       }
       if (mirror) {
         gs_matrix_pop();
@@ -2211,6 +2349,14 @@ obs_properties_t *AutoCaptureSource::GetProperties(void *data)
   obs_properties_t *advanced_group = obs_properties_create();
   obs_property_t *fit = obs_properties_add_bool(advanced_group, kFitToCanvasSetting, Text("AutoAppCapture.FitToCanvas"));
   obs_property_set_long_description(fit, Text("AutoAppCapture.FitToCanvas.Tooltip"));
+  obs_property_t *scale = obs_properties_add_list(advanced_group, kScaleFilterSetting,
+                                                  Text("AutoAppCapture.ScaleFilter"), OBS_COMBO_TYPE_LIST,
+                                                  OBS_COMBO_FORMAT_STRING);
+  obs_property_list_add_string(scale, Text("AutoAppCapture.ScaleFilter.Bilinear"), kScaleFilterBilinear);
+  obs_property_list_add_string(scale, Text("AutoAppCapture.ScaleFilter.Point"), kScaleFilterPoint);
+  obs_property_list_add_string(scale, Text("AutoAppCapture.ScaleFilter.Bicubic"), kScaleFilterBicubic);
+  obs_property_list_add_string(scale, Text("AutoAppCapture.ScaleFilter.Lanczos"), kScaleFilterLanczos);
+  obs_property_set_long_description(scale, Text("AutoAppCapture.ScaleFilter.Tooltip"));
   obs_property_t *interval = obs_properties_add_float_slider(advanced_group, kPollIntervalSetting,
                                                              Text("AutoAppCapture.PollInterval"), 0.1, 5.0, 0.1);
   obs_property_float_set_suffix(interval, Text("AutoAppCapture.PollInterval.Suffix"));
@@ -2263,6 +2409,7 @@ void AutoCaptureSource::GetDefaults(obs_data_t *settings)
   obs_data_set_default_string(settings, kStatusTextSetting, Text("AutoAppCapture.Status.Empty"));
   obs_data_set_default_double(settings, kPollIntervalSetting, 0.5);
   obs_data_set_default_bool(settings, kFitToCanvasSetting, false);
+  obs_data_set_default_string(settings, kScaleFilterSetting, kScaleFilterBilinear);
   // Was enabled by default in earlier versions: sources that never touched the
   // checkbox rely on it, and nothing is mirrored until a title rule matches.
   obs_data_set_default_bool(settings, kMirrorEnabledSetting, true);

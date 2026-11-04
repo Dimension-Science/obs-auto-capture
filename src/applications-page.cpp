@@ -141,11 +141,35 @@ void ApplicationsPage::BuildUi()
   fit_to_canvas_ = new QCheckBox(Text("AutoAppCapture.FitToCanvas"), this);
   fit_to_canvas_->setToolTip(Text("AutoAppCapture.FitToCanvas.Tooltip"));
 
+  scale_filter_ = new QComboBox(this);
+  scale_filter_->addItem(Text("AutoAppCapture.ScaleFilter.Bilinear"), "bilinear");
+  scale_filter_->addItem(Text("AutoAppCapture.ScaleFilter.Point"), "point");
+  scale_filter_->addItem(Text("AutoAppCapture.ScaleFilter.Bicubic"), "bicubic");
+  scale_filter_->addItem(Text("AutoAppCapture.ScaleFilter.Lanczos"), "lanczos");
+  scale_filter_->setToolTip(Text("AutoAppCapture.ScaleFilter.Tooltip"));
+
+  // The filter is only used while the source does the scaling.
+  auto *filter_row = new QHBoxLayout();
+  filter_row->addWidget(new QLabel(Text("AutoAppCapture.ScaleFilter"), this));
+  filter_row->addWidget(scale_filter_);
+  filter_row->addStretch(1);
+  const auto sync_filter = [this, filter_row] {
+    const bool on = fit_to_canvas_->isChecked();
+    for (int i = 0; i < filter_row->count(); ++i) {
+      if (QWidget *w = filter_row->itemAt(i)->widget()) {
+        w->setEnabled(on);
+      }
+    }
+  };
+  connect(fit_to_canvas_, &QCheckBox::toggled, this, sync_filter);
+
   auto *layout = new QVBoxLayout(this);
   layout->addLayout(lists, 1);
   layout->addWidget(editor_);
   layout->addWidget(fit_to_canvas_);
+  layout->addLayout(filter_row);
   layout->addLayout(poll_row);
+  sync_filter();
 }
 
 void ApplicationsPage::Load(obs_data_t *settings)
@@ -153,6 +177,9 @@ void ApplicationsPage::Load(obs_data_t *settings)
   rules_ = capture_rules::Load(settings);
   poll_interval_->setValue(obs_data_get_double(settings, "poll_interval_seconds"));
   fit_to_canvas_->setChecked(obs_data_get_bool(settings, "fit_to_canvas"));
+  const QString filter = QString::fromUtf8(obs_data_get_string(settings, "scale_filter"));
+  const int filter_index = scale_filter_->findData(filter.isEmpty() ? QString("bilinear") : filter);
+  scale_filter_->setCurrentIndex(filter_index >= 0 ? filter_index : 0);
   ReloadTrackedList();
 }
 
@@ -161,6 +188,7 @@ void ApplicationsPage::Save(obs_data_t *settings) const
   capture_rules::Store(settings, rules_);
   obs_data_set_double(settings, "poll_interval_seconds", poll_interval_->value());
   obs_data_set_bool(settings, "fit_to_canvas", fit_to_canvas_->isChecked());
+  obs_data_set_string(settings, "scale_filter", scale_filter_->currentData().toString().toUtf8().constData());
 }
 
 void ApplicationsPage::ReloadTrackedList()
