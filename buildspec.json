@@ -32,7 +32,7 @@
     },
     "name": "obs-auto-capture",
     "displayName": "OBS Auto Capture",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "author": "Dimension Science",
     "website": "https://github.com/Dimension-Science/obs-auto-capture",
     "email": ""
