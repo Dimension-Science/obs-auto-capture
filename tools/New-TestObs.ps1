@@ -49,6 +49,11 @@ if (Test-Path $Root) { Remove-Item $Root -Recurse -Force }
 
 Write-Host "Copying $SourceObs ..."
 Copy-Item $SourceObs $Root -Recurse
+# An install that has ever been run in portable mode keeps a config folder next
+# to the executable, and the copy brings its scene collections and its old logs
+# along. Delete it: the check below reads the newest log, and a log left there
+# by someone else would answer for a start that never happened.
+if (Test-Path (Join-Path $Root "config")) { Remove-Item (Join-Path $Root "config") -Recurse -Force }
 Set-Content (Join-Path $Root "portable_mode.txt") -Value "" -Encoding ascii
 
 Copy-Item (Join-Path $Payload "bin\64bit\obs-auto-capture.dll") (Join-Path $Root "obs-plugins\64bit") -Force
@@ -130,7 +135,8 @@ $result = [ordered]@{
   Loaded  = [bool]($lines | Select-String -Quiet "\[obs-auto-capture\] Plugin loaded")
   # Loading only proves the imports resolved. Creating the source proves it runs.
   Source  = [bool]($lines | Select-String -Quiet "\[obs-auto-capture\] Internal 'window_capture' source created")
-  Crashed = (Test-Path (Join-Path $cfg "crashes"))
+  # OBS creates this folder on every start, so count what is inside it.
+  Crashed = ((Get-ChildItem (Join-Path $cfg "crashes") -File -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
 }
 [PSCustomObject]$result
 if (-not ($result.Loaded -and $result.Source)) { throw "Smoke test failed: see $($log.FullName)" }
