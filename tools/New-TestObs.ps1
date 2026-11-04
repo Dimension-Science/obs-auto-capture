@@ -24,7 +24,10 @@ param(
   # Applications the demo source tracks. A title filter keeps the capture off
   # windows that are none of the test's business.
   [string]$DemoProcess = "chrome.exe",
-  [string]$DemoTitle = ""
+  [string]$DemoTitle = "",
+  # OBS interface language for the copy. Left empty, OBS picks its own. Set it
+  # when the pictures have to come out in one language whatever the machine.
+  [string]$Language = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,9 +70,11 @@ New-Item -ItemType Directory -Force (Join-Path $cfg "basic\scenes"), (Join-Path 
 # OBS 30.2 split the per-user settings into user.ini and 31 reads only that
 # one. Writing both keeps this working across the supported range; miss it and
 # OBS silently starts with an empty collection, which reads as a plugin fault.
+$languageLine = if ($Language) { "Language=$Language" } else { "" }
 $appConfig = @"
 [General]
 FirstRun=false
+$languageLine
 [Basic]
 Profile=Demo
 ProfileDir=Demo
