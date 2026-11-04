@@ -88,10 +88,27 @@ jobs:
           name: obs-auto-capture-release
           path: artifacts/
 
+      # Release notes are written by hand and reviewed with the code, in
+      # docs/release-notes/<tag>.md. A list of commit subjects is not a
+      # description of what changed for the person downloading it. When the
+      # file is missing the build stops rather than publishing a bare commit
+      # list, which is the thing this exists to avoid.
+      - name: Check the release notes exist
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $notes = "docs/release-notes/${{ github.ref_name }}.md"
+          if (-not (Test-Path $notes)) {
+            throw "No $notes. Write the release notes before tagging."
+          }
+          Get-Content $notes -Raw
+
       - name: Attach to the release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           draft: true
+          body_path: docs/release-notes/${{ github.ref_name }}.md
+          # Appended below the written notes by GitHub.
           generate_release_notes: true

@@ -56,6 +56,8 @@ ApplicationsPage::ApplicationsPage(QWidget *parent) : QWidget(parent)
 void ApplicationsPage::BuildUi()
 {
   tracked_ = new QListWidget(this);
+  // Keeps the list from being the part that gives way when space is short.
+  tracked_->setMinimumHeight(120);
 
   add_ = new QPushButton(Text("AutoAppCapture.Window.AddApp"), this);
   remove_ = new QPushButton(Text("AutoAppCapture.Window.RemoveApp"), this);

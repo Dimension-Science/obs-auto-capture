@@ -15,6 +15,7 @@
 #include <QListWidget>
 #include <QPointer>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTimer>
@@ -95,9 +96,17 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);
   nav_->setCurrentRow(0);
 
+  // The pages scroll. Without this the layout squeezes form rows below their
+  // own height as soon as a page grows or the window is dragged smaller, and
+  // the fields end up clipped to a few pixels.
+  auto *scroll = new QScrollArea(this);
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  scroll->setWidget(pages_);
+
   auto *content = new QHBoxLayout();
   content->addWidget(nav_);
-  content->addWidget(pages_, 1);
+  content->addWidget(scroll, 1);
 
   // The picture on top, the controls under it, the way the properties dialog
   // does it. It also shows where the blur actually lands.
@@ -106,9 +115,10 @@ SettingsWindow::SettingsWindow(obs_source_t *source, QWidget *parent) : QDialog(
   splitter->addWidget(preview);
   auto *below = new QWidget(splitter);
   below->setLayout(content);
-  // Without a floor the splitter happily squeezes the controls into a few
-  // pixels of scrollbar, which is what the first version did.
-  below->setMinimumHeight(400);
+  // A floor so the controls are not reduced to a scrollbar, but a modest one:
+  // the scroll area above is what actually guarantees the fields keep their
+  // height, so this does not have to grow every time a page gains a row.
+  below->setMinimumHeight(300);
   splitter->addWidget(below);
   splitter->setChildrenCollapsible(false);
   splitter->setStretchFactor(0, 3);
