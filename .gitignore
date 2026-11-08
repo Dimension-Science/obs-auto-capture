@@ -31,3 +31,6 @@
 .vs/
 .vscode/
 CMakeUserPresets.json
+
+# Written by the vendored CMake template on every configure
+/cmake/.CMakeBuildNumber

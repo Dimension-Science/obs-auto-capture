@@ -25,9 +25,17 @@ param(
   # windows that are none of the test's business.
   [string]$DemoProcess = "chrome.exe",
   [string]$DemoTitle = "",
+  # Capture method of the demo rule. "window" is the way to check that game
+  # capture is left aimed at nothing: with it set, no hook attempt should
+  # appear in the log at all.
+  [ValidateSet("auto", "window", "game")][string]$DemoMode = "auto",
   # OBS interface language for the copy. Left empty, OBS picks its own. Set it
   # when the pictures have to come out in one language whatever the machine.
-  [string]$Language = ""
+  [string]$Language = "",
+  # How often the demo source looks at the foreground window. The default is the
+  # one the source ships with; raise it to reproduce what a user sees who has
+  # moved the slider, because the interval is how long a lost capture stays lost.
+  [double]$PollInterval = 0.5
 )
 
 $ErrorActionPreference = "Stop"
@@ -98,9 +106,9 @@ FPSCommon=60
 "@ | Set-Content (Join-Path $cfg "basic\profiles\Demo\basic.ini") -Encoding utf8
 
 $rule = [ordered]@{
-  id = "demo"; name = "Demo"; process = $DemoProcess; mode = "auto"; scope = "any"
+  id = "demo"; name = "Demo"; process = $DemoProcess; mode = $DemoMode; scope = "any"
   title = $DemoTitle; enabled = $true; blur = $true
-  value = "$DemoProcess | auto | any | $(if ($DemoTitle) { $DemoTitle } else { '*' })"
+  value = "$DemoProcess | $DemoMode | any | $(if ($DemoTitle) { $DemoTitle } else { '*' })"
 }
 $scene = [ordered]@{
   current_scene = "Scene"; current_program_scene = "Scene"
@@ -114,7 +122,7 @@ $scene = [ordered]@{
         blur_strength = 24; blur_padding = 6
         blur_zone_left = 6.0; blur_zone_top = 4.5; blur_zone_width = 80.5; blur_zone_height = 3.0
         fit_to_canvas = $true; scale_filter = "bilinear"
-        mirror_enabled = $true; mirror_title_rules = ""; poll_interval_seconds = 0.5
+        mirror_enabled = $true; mirror_title_rules = ""; poll_interval_seconds = $PollInterval
         target_rules = @($rule)
       }
     },
