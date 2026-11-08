@@ -456,9 +456,88 @@ obs_data_t *CreateGameCaptureSettings(const std::string &window_selector)
   return settings;
 }
 
+// Window capture needs nothing beyond a non-zero size. Its WGC backend is bound
+// to one window handle and reports zero the moment that window is gone or
+// minimised, so it cannot hand over a picture of another application.
+//
+// Its size must not be checked against the window either. WGC sets it from the
+// texture of the last frame that arrived, and it sends a frame only when the
+// window repaints: an idle window keeps the size it had before it was resized,
+// for seconds at a time. Measured against GetWindowRect that reads as a
+// mismatch, and a run with a resized Notepad threw away three working captures
+// in a row before this was left alone.
 bool HasUsableVideo(obs_source_t *source)
 {
   return source != nullptr && obs_source_get_width(source) > 0 && obs_source_get_height(source) > 0;
+}
+
+// Game capture is the backend that needs judging, and the numbers below are
+// what it is judged by. How far the shape of its frame may differ from the
+// shape of the window it is supposed to come from: a window border, a title bar
+// and DPI virtualisation each shift these a little, and a game whose swap chain
+// is smaller than its window shifts them further, so the bounds are wide. They
+// are here to catch a frame that belongs to another application, not to measure
+// one.
+// How long after a target appears automatic mode may still change its mind
+// about which backend shows it. Long enough for a game to be hooked, short
+// enough that nothing takes the picture over while it is being watched.
+constexpr float kBackendGraceSeconds = 10.0f;
+
+constexpr double kCaptureAspectTolerance = 1.25;
+constexpr double kCaptureScaleFloor = 0.25;
+constexpr double kCaptureScaleCeiling = 4.0;
+
+// The size of the window the capture is pointed at. GetWindowRect counts the
+// invisible resize border that the captured frame leaves out; the tolerances
+// above cover that, and a cheap call is worth more than an exact one here,
+// because this runs for every frame.
+bool GetTargetWindowSize(HWND hwnd, uint32_t *cx, uint32_t *cy)
+{
+  *cx = 0;
+  *cy = 0;
+  RECT rect = {0, 0, 0, 0};
+  if (hwnd == nullptr || IsIconic(hwnd) || !GetWindowRect(hwnd, &rect)) {
+    return false;
+  }
+  if (rect.right <= rect.left || rect.bottom <= rect.top) {
+    return false;
+  }
+  *cx = static_cast<uint32_t>(rect.right - rect.left);
+  *cy = static_cast<uint32_t>(rect.bottom - rect.top);
+  return true;
+}
+
+// Answers whether a game capture frame of this size can belong to that window.
+//
+// A non-zero size means game capture is delivering frames. It does not mean the
+// frames are the ones that were asked for: the hook lives inside a process, and
+// it goes on reporting the size of the application it was capturing before for
+// a while after the source has been pointed at another one. Taken on trust,
+// that puts the picture of the wrong application on the canvas. Shape separates
+// the two, because two unrelated windows rarely have the same one.
+//
+// The lag that rules this out for window capture does not apply here: a game
+// redraws without pause, so the size it reports is the size it draws now.
+//
+// A frame that cannot be judged counts as good. Without the window there is
+// nothing to compare against, and dropping the frame would buy an empty canvas
+// in exchange for a check that was never made.
+bool IsPlausibleCaptureSize(uint32_t cx, uint32_t cy, uint32_t window_cx, uint32_t window_cy)
+{
+  if (cx == 0 || cy == 0) {
+    return false;
+  }
+  if (window_cx == 0 || window_cy == 0) {
+    return true;
+  }
+  const double frame_aspect = static_cast<double>(cx) / static_cast<double>(cy);
+  const double window_aspect = static_cast<double>(window_cx) / static_cast<double>(window_cy);
+  if (frame_aspect > window_aspect * kCaptureAspectTolerance ||
+      window_aspect > frame_aspect * kCaptureAspectTolerance) {
+    return false;
+  }
+  const double scale = static_cast<double>(cx) / static_cast<double>(window_cx);
+  return scale >= kCaptureScaleFloor && scale <= kCaptureScaleCeiling;
 }
 
 // ---------------------------------------------------------------------------
@@ -1416,15 +1495,40 @@ void AutoCaptureSource::Update(obs_data_t *settings)
 void AutoCaptureSource::Tick(float seconds)
 {
   elapsed_seconds_ += seconds;
-  if (elapsed_seconds_ < poll_interval_seconds_) {
+  seconds_since_retarget_ += seconds;
+  // A target that has been closed cannot be waited out. Holding it until the
+  // next poll leaves the source with nothing to draw for as long as the check
+  // interval, and that interval goes up to five seconds. Clearing the match
+  // below sets the handle to null, so this costs one poll and not a storm.
+  const bool target_gone = active_window_ != nullptr && !IsWindow(active_window_);
+  if (elapsed_seconds_ < poll_interval_seconds_ && !target_gone) {
     return;
   }
   elapsed_seconds_ = 0.0f;
   PollActiveWindow();
   SyncCaptureSources();
   UpdateRenderBackend(SelectRenderSource());
+  StandGameCaptureDownIfSettled();
   SyncAddressBarLocator();
   status_text_ = BuildStatusText();
+}
+
+// Window capture has held the picture past the point where game capture could
+// still take it, so there is nothing left for the hook to win. Aim it at
+// nothing: left aimed, it knocks at the application every two seconds for as
+// long as that application is on screen.
+void AutoCaptureSource::StandGameCaptureDownIfSettled()
+{
+  if (game_stood_down_ || active_game_selector_.empty()) {
+    return;
+  }
+  if (committed_backend_ != AutoCaptureBackend::WindowCapture || seconds_since_retarget_ <= kBackendGraceSeconds) {
+    return;
+  }
+  game_stood_down_ = true;
+  UpdateCaptureTargets(active_window_selector_, false);
+  blog(LOG_INFO, "[obs-auto-capture] Game capture stood down for %s: window capture has the picture.",
+       active_process_name_.c_str());
 }
 
 const char *AutoCaptureSource::GetName(void *)
@@ -2468,17 +2572,34 @@ void AutoCaptureSource::PollActiveWindow()
   }
   // The previous capture stays alive during Alt+Tab and other transient
   // foreground changes; it is replaced only once another enabled rule matches.
+  //
+  // A window that has been closed is not a transient change. Nothing is left to
+  // keep, and holding it is how the source goes dark and stays dark: the handle
+  // never comes back, and the next window to match has to arrive on its own.
+  // Looking at OBS to find out why matches no rule at all, so the canvas stays
+  // empty until the user goes back to the application.
+  const bool target_gone = active_window_ != nullptr && !IsWindow(active_window_);
+  const auto give_up = [&] {
+    if (target_gone) {
+      ClearActiveMatch();
+      StopCapturing();
+    }
+  };
+
   HWND hwnd = NormalizeWindowForCapture(GetForegroundWindow());
   if (!hwnd || !IsWindowVisible(hwnd)) {
+    give_up();
     return;
   }
   DWORD pid = 0;
   GetWindowThreadProcessId(hwnd, &pid);
   if (pid == 0) {
+    give_up();
     return;
   }
   std::string process_name = ToLower(GetProcessNameFromPid(pid));
   if (process_name.empty() || target_processes_.find(process_name) == target_processes_.end()) {
+    give_up();
     return;
   }
   const std::string title = GetWindowTitle(hwnd);
@@ -2501,6 +2622,7 @@ void AutoCaptureSource::PollActiveWindow()
     break;
   }
   if (matched_rule_index == kInvalidRuleIndex) {
+    give_up();
     return;
   }
 
@@ -2587,7 +2709,10 @@ bool AutoCaptureSource::EnsureChildCaptureSource(obs_source_t **slot,
 void AutoCaptureSource::ResetCaptureSources()
 {
   active_window_selector_.clear();
+  active_game_selector_.clear();
+  game_stood_down_ = false;
   active_backend_ = AutoCaptureBackend::None;
+  committed_backend_ = AutoCaptureBackend::None;
   if (window_capture_source_ != nullptr) {
     obs_source_remove_active_child(source_, window_capture_source_);
     obs_source_release(window_capture_source_);
@@ -2617,25 +2742,61 @@ void AutoCaptureSource::SyncCaptureSources()
 
 void AutoCaptureSource::UpdateCaptureTargets(const std::string &window_selector, bool force)
 {
-  if (!force && (window_selector.empty() || window_selector == active_window_selector_)) {
+  if (!force && window_selector.empty()) {
     return;
   }
-  if (window_capture_source_ != nullptr) {
+
+  // Game capture is aimed only at a target whose rule can actually use it. Its
+  // hook has to be let into the other process, and while it is aimed at
+  // something it knocks every two seconds for as long as the application is on
+  // screen: a hundred attempts a minute, measured against Blender, none of
+  // which could have succeeded. A rule set to window capture leaves it aimed at
+  // nothing, and it goes quiet.
+  const AutoCaptureRule *rule = GetActiveRule();
+  const AutoCaptureMode mode = rule != nullptr ? rule->capture_mode : AutoCaptureMode::Auto;
+
+  const bool window_moved = force || window_selector != active_window_selector_;
+  if (window_moved) {
+    // A new target is a new race, so game capture is given its chance again.
+    game_stood_down_ = false;
+  }
+  const bool game_unwanted = mode == AutoCaptureMode::Window || game_stood_down_;
+  const std::string game_selector = game_unwanted ? std::string() : window_selector;
+  const bool game_moved = force || game_selector != active_game_selector_;
+  if (!window_moved && !game_moved) {
+    return;
+  }
+
+  if (window_moved && window_capture_source_ != nullptr) {
     obs_data_t *window_settings = CreateWindowCaptureSettings(window_selector);
     obs_source_update(window_capture_source_, window_settings);
     obs_data_release(window_settings);
   }
-  if (game_capture_source_ != nullptr) {
-    obs_data_t *game_settings = CreateGameCaptureSettings(window_selector);
+  if (game_moved && game_capture_source_ != nullptr) {
+    obs_data_t *game_settings = CreateGameCaptureSettings(game_selector);
     obs_source_update(game_capture_source_, game_settings);
     obs_data_release(game_settings);
   }
   active_window_selector_ = window_selector;
+  active_game_selector_ = game_selector;
+  // A mismatch reported for the previous target says nothing about this one.
+  ignored_game_cx_ = 0;
+  ignored_game_cy_ = 0;
+  // A new target, or a game backend newly aimed at one, gets its own choice of
+  // backend and its own few seconds in which that choice can still change.
+  // Standing game capture down is neither, and must not restart the clock.
+  if (window_moved || !game_selector.empty()) {
+    committed_backend_ = AutoCaptureBackend::None;
+    seconds_since_retarget_ = 0.0f;
+  }
   if (window_selector.empty()) {
     blog(LOG_INFO, "[obs-auto-capture] Capture stopped: no enabled rule is driving it any more.");
   } else {
-    blog(LOG_INFO, "[obs-auto-capture] Retargeted internal captures to process=%s title=%s",
-         active_process_name_.c_str(), active_window_title_.c_str());
+    const char *game_note = !game_selector.empty() ? "aimed at it too"
+                            : game_stood_down_      ? "stood down"
+                                                    : "not used by this rule";
+    blog(LOG_INFO, "[obs-auto-capture] Retargeted internal captures to process=%s title=%s (game capture %s)",
+         active_process_name_.c_str(), active_window_title_.c_str(), game_note);
   }
 }
 
@@ -2643,21 +2804,78 @@ obs_source_t *AutoCaptureSource::SelectRenderSource() const
 {
   const AutoCaptureRule *rule = GetActiveRule();
   const AutoCaptureMode mode = rule != nullptr ? rule->capture_mode : AutoCaptureMode::Auto;
+
+  const auto game_delivers = [&] {
+    if (game_capture_source_ == nullptr) {
+      return false;
+    }
+    const uint32_t cx = obs_source_get_width(game_capture_source_);
+    const uint32_t cy = obs_source_get_height(game_capture_source_);
+    uint32_t window_cx = 0;
+    uint32_t window_cy = 0;
+    GetTargetWindowSize(active_window_, &window_cx, &window_cy);
+    if (IsPlausibleCaptureSize(cx, cy, window_cx, window_cy)) {
+      return true;
+    }
+    // One line per size. This runs for every frame, and a hook that keeps
+    // offering the same wrong frame would otherwise fill the log.
+    if (cx != 0 && cy != 0 && (ignored_game_cx_ != cx || ignored_game_cy_ != cy)) {
+      ignored_game_cx_ = cx;
+      ignored_game_cy_ = cy;
+      blog(LOG_INFO, "[obs-auto-capture] Ignoring game capture: a %ux%u frame does not fit the %ux%u window of %s",
+           static_cast<unsigned>(cx), static_cast<unsigned>(cy), static_cast<unsigned>(window_cx),
+           static_cast<unsigned>(window_cy), active_process_name_.c_str());
+    }
+    return false;
+  };
+
   switch (mode) {
     case AutoCaptureMode::Window:
+      committed_backend_ = AutoCaptureBackend::WindowCapture;
       return HasUsableVideo(window_capture_source_) ? window_capture_source_ : nullptr;
     case AutoCaptureMode::Game:
-      return HasUsableVideo(game_capture_source_) ? game_capture_source_ : nullptr;
+      committed_backend_ = AutoCaptureBackend::GameCapture;
+      return game_delivers() ? game_capture_source_ : nullptr;
     case AutoCaptureMode::Auto:
     default:
-      if (HasUsableVideo(game_capture_source_)) {
-        return game_capture_source_;
-      }
-      if (HasUsableVideo(window_capture_source_)) {
-        return window_capture_source_;
-      }
-      return nullptr;
+      break;
   }
+
+  // Automatic mode decides when the target appears and then stands by what it
+  // decided. Deciding afresh every frame meant whichever backend came up last
+  // took the picture over, however long the other one had been showing it: the
+  // game capture hook can land on an ordinary application minutes after it
+  // started knocking, and what it hands over need not be anything the user
+  // wants to see. Blender went black that way, at the moment a project was
+  // opened and the hook finally got in.
+  //
+  // The commitment only protects a picture that exists. A backend that stops
+  // delivering releases it, and the other one is free to take over at once.
+  if (committed_backend_ == AutoCaptureBackend::GameCapture && game_delivers()) {
+    return game_capture_source_;
+  }
+  if (committed_backend_ == AutoCaptureBackend::WindowCapture && HasUsableVideo(window_capture_source_)) {
+    // A game is normally hooked within a second or two of becoming the target,
+    // while window capture is up immediately. Without this window of grace the
+    // window backend would win every race and game capture would never run in
+    // automatic mode at all.
+    if (seconds_since_retarget_ <= kBackendGraceSeconds && game_delivers()) {
+      committed_backend_ = AutoCaptureBackend::GameCapture;
+      return game_capture_source_;
+    }
+    return window_capture_source_;
+  }
+
+  if (game_delivers()) {
+    committed_backend_ = AutoCaptureBackend::GameCapture;
+    return game_capture_source_;
+  }
+  if (HasUsableVideo(window_capture_source_)) {
+    committed_backend_ = AutoCaptureBackend::WindowCapture;
+    return window_capture_source_;
+  }
+  committed_backend_ = AutoCaptureBackend::None;
+  return nullptr;
 }
 
 void AutoCaptureSource::UpdateRenderBackend(obs_source_t *selected_source)

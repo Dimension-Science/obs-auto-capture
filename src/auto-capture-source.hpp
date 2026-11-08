@@ -132,6 +132,7 @@ private:
   void UpdateCaptureTargets(const std::string &window_selector, bool force);
   obs_source_t *SelectRenderSource() const;
   void UpdateRenderBackend(obs_source_t *selected_source);
+  void StandGameCaptureDownIfSettled();
   // The size the source reports while "fit to canvas" is on, so a 640x480 game
   // and a 1920x1080 browser both arrive as the same sized item and the scene
   // transform stays put when the capture switches.
@@ -177,7 +178,21 @@ private:
   std::string active_process_name_;
   std::string active_window_title_;
   std::string active_window_selector_;
+  // What each backend is aimed at. They are kept apart because a rule set to
+  // window capture leaves the game side aimed at nothing on purpose.
+  std::string active_game_selector_;
   AutoCaptureBackend active_backend_ = AutoCaptureBackend::None;
+  // The backend automatic mode settled on for the current target, and how long
+  // that target has been the target. See SelectRenderSource.
+  mutable AutoCaptureBackend committed_backend_ = AutoCaptureBackend::None;
+  float seconds_since_retarget_ = 0.0f;
+  // Set once game capture can no longer win the current target, so that its
+  // hook stops knocking at the application. Cleared by the next target.
+  bool game_stood_down_ = false;
+  // The game capture frame size last reported as not fitting the target window,
+  // so the same mismatch is logged once and not for every frame.
+  mutable uint32_t ignored_game_cx_ = 0;
+  mutable uint32_t ignored_game_cy_ = 0;
   std::string status_text_;
   std::vector<std::string> mirror_title_rules_;
   bool mirror_enabled_ = true;
