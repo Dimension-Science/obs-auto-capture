@@ -64,7 +64,16 @@ void ApplicationsPage::BuildUi()
 
   connect(add_, &QPushButton::clicked, this, [this] { AddApplication(); });
   connect(remove_, &QPushButton::clicked, this, [this] { RemoveSelectedRule(); });
-  connect(tracked_, &QListWidget::currentRowChanged, this, [this] { ShowSelectedRule(); });
+  // Refilling the list clears it first, and an empty list reports no selection.
+  // Acting on that report would disable the editor and the remove button for an
+  // instant, which is enough to throw the page out of place: see the note in
+  // ShowSelectedRule.
+  connect(tracked_, &QListWidget::currentRowChanged, this, [this] {
+    if (loading_editor_) {
+      return;
+    }
+    ShowSelectedRule();
+  });
 
   // The checkbox in the list is the same "track this application" flag as in
   // the editor, so toggling it there has to write through as well.
@@ -222,6 +231,18 @@ int ApplicationsPage::SelectedRuleIndex() const
 void ApplicationsPage::ShowSelectedRule()
 {
   const int index = SelectedRuleIndex();
+
+  // Qt moves the keyboard focus to the next widget in the chain when the widget
+  // holding it is disabled, and the scroll area the pages sit in scrolls to
+  // wherever the focus went. Removing the last application disables this button
+  // and the whole editor under it, so the focus skipped to the poll interval at
+  // the foot of the page and dragged the page down with it, right under the
+  // hand that had just clicked Remove. Hand the focus to the neighbouring
+  // button instead; it is next to where the user is looking and never disabled.
+  if (index < 0 && remove_->hasFocus()) {
+    add_->setFocus(Qt::OtherFocusReason);
+  }
+
   editor_->setEnabled(index >= 0);
   remove_->setEnabled(index >= 0);
   if (index < 0) {
