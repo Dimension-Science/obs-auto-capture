@@ -133,6 +133,7 @@ private:
   obs_source_t *SelectRenderSource() const;
   void UpdateRenderBackend(obs_source_t *selected_source);
   void StandGameCaptureDownIfSettled();
+  void RepointStalledWindowCapture(float seconds);
   // The size the source reports while "fit to canvas" is on, so a 640x480 game
   // and a 1920x1080 browser both arrive as the same sized item and the scene
   // transform stays put when the capture switches.
@@ -181,6 +182,14 @@ private:
   // What each backend is aimed at. They are kept apart because a rule set to
   // window capture leaves the game side aimed at nothing on purpose.
   std::string active_game_selector_;
+  // The window the children are pointed at. The selector above names it by
+  // title, which some applications rewrite several times a second, so the
+  // handle is what decides whether they have to be pointed again.
+  HWND capture_window_ = nullptr;
+  // How long window capture has been showing nothing for the current target,
+  // and how many times it has been pointed at it again because of that.
+  float window_capture_dry_seconds_ = 0.0f;
+  int window_capture_retries_ = 0;
   AutoCaptureBackend active_backend_ = AutoCaptureBackend::None;
   // The backend automatic mode settled on for the current target, and how long
   // that target has been the target. See SelectRenderSource.

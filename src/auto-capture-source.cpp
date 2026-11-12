@@ -478,6 +478,20 @@ bool HasUsableVideo(obs_source_t *source)
 // is smaller than its window shifts them further, so the bounds are wide. They
 // are here to catch a frame that belongs to another application, not to measure
 // one.
+// A window capture that shows nothing for this long, while its window is alive
+// and on screen, is pointed at the window again. Short enough that a viewer
+// barely sees the gap, long enough not to fire on the ordinary pause between a
+// capture starting and its first frame.
+constexpr float kWindowCaptureRetrySeconds = 2.0f;
+
+// How many quick attempts one target gets before they are spaced out. A window
+// that is simply not repainting is not a mistake to correct, and restarting its
+// capture twice a second for ever would be the flicker this is meant to
+// prevent. The slow attempts carry on, so a capture that could come up is never
+// abandoned, at a cost of one restart a minute on a picture nobody is seeing.
+constexpr int kWindowCaptureRetries = 3;
+constexpr float kWindowCaptureSlowRetrySeconds = 30.0f;
+
 // How long after a target appears automatic mode may still change its mind
 // about which backend shows it. Long enough for a game to be hooked, short
 // enough that nothing takes the picture over while it is being watched.
@@ -1496,6 +1510,7 @@ void AutoCaptureSource::Tick(float seconds)
 {
   elapsed_seconds_ += seconds;
   seconds_since_retarget_ += seconds;
+  RepointStalledWindowCapture(seconds);
   // A target that has been closed cannot be waited out. Holding it until the
   // next poll leaves the source with nothing to draw for as long as the check
   // interval, and that interval goes up to five seconds. Clearing the match
@@ -1511,6 +1526,50 @@ void AutoCaptureSource::Tick(float seconds)
   StandGameCaptureDownIfSettled();
   SyncAddressBarLocator();
   status_text_ = BuildStatusText();
+}
+
+// The selector names the window by the title it had when the children were
+// pointed at it, and window capture accepts nothing but an exact match of that
+// title. An application that keeps rewriting its title can change it in the
+// milliseconds between the title being read here and the child resolving it,
+// and then the child finds no window at all: it goes on looking for a title
+// that will never come back, and the source shows nothing.
+//
+// A window capture that has shown nothing while its window is alive and on
+// screen is therefore pointed at it again, with the title as it reads now.
+void AutoCaptureSource::RepointStalledWindowCapture(float seconds)
+{
+  if (window_capture_source_ == nullptr || active_window_ == nullptr || capture_window_ != active_window_) {
+    return;
+  }
+  if (obs_source_get_width(window_capture_source_) > 0 || IsIconic(active_window_) ||
+      !IsWindowVisible(active_window_)) {
+    window_capture_dry_seconds_ = 0.0f;
+    return;
+  }
+  window_capture_dry_seconds_ += seconds;
+  const float wait = window_capture_retries_ < kWindowCaptureRetries ? kWindowCaptureRetrySeconds
+                                                                     : kWindowCaptureSlowRetrySeconds;
+  if (window_capture_dry_seconds_ < wait) {
+    return;
+  }
+
+  window_capture_dry_seconds_ = 0.0f;
+  ++window_capture_retries_;
+  const std::string selector = BuildWindowSelector(active_window_);
+  if (selector.empty()) {
+    return;
+  }
+  // Only the quick attempts are logged one by one. The slow ones say so once,
+  // because they go on for as long as the window stands there showing nothing.
+  if (window_capture_retries_ <= kWindowCaptureRetries + 1) {
+    blog(LOG_INFO, "[obs-auto-capture] Window capture of %s has shown nothing; pointing it at the window again (%d).",
+         active_process_name_.c_str(), window_capture_retries_);
+  }
+  obs_data_t *settings = CreateWindowCaptureSettings(selector);
+  obs_source_update(window_capture_source_, settings);
+  obs_data_release(settings);
+  active_window_selector_ = selector;
 }
 
 // Window capture has held the picture past the point where game capture could
@@ -2626,8 +2685,12 @@ void AutoCaptureSource::PollActiveWindow()
     return;
   }
 
+  // A title that has been rewritten is not a new target: the window, the
+  // process and the rule are the same. Logging it as one buried the useful
+  // lines under six hundred of these in a RetroArch session, which writes its
+  // frame rate into the title bar.
   const bool changed = active_window_ != hwnd || active_pid_ != pid || active_rule_index_ != matched_rule_index ||
-                       active_process_name_ != process_name || active_window_title_ != title;
+                       active_process_name_ != process_name;
   active_window_ = hwnd;
   active_pid_ = pid;
   active_rule_index_ = matched_rule_index;
@@ -2710,6 +2773,7 @@ void AutoCaptureSource::ResetCaptureSources()
 {
   active_window_selector_.clear();
   active_game_selector_.clear();
+  capture_window_ = nullptr;
   game_stood_down_ = false;
   active_backend_ = AutoCaptureBackend::None;
   committed_backend_ = AutoCaptureBackend::None;
@@ -2733,11 +2797,29 @@ void AutoCaptureSource::SyncCaptureSources()
   if (active_window_ == nullptr || active_process_name_.empty()) {
     return;
   }
-  const std::string window_selector = BuildWindowSelector(active_window_);
-  if (window_selector.empty()) {
+  // The selector names a window by its title, and a title is not a stable
+  // name. RetroArch keeps its frame rate in it, so the text changes with every
+  // poll; browsers rewrite it on every tab switch. Building a new selector for
+  // the same window and handing it to the children tears both captures down and
+  // starts them again: the picture blinks each time, and a game capture hook
+  // that had just succeeded is thrown away before anything is drawn with it.
+  // Measured on RetroArch: 605 pointless retargets in one session.
+  //
+  // So the children are re-pointed when the handle changes. While it is the
+  // same window, the selector they already hold keeps naming it, whatever the
+  // application writes in the title bar.
+  if (active_window_ != capture_window_) {
+    const std::string window_selector = BuildWindowSelector(active_window_);
+    if (window_selector.empty()) {
+      return;
+    }
+    UpdateCaptureTargets(window_selector, false);
     return;
   }
-  UpdateCaptureTargets(window_selector, false);
+  // The aim of game capture can still change while the window stands: the user
+  // can switch the rule to window capture, and window capture can win the
+  // target outright.
+  UpdateCaptureTargets(active_window_selector_, false);
 }
 
 void AutoCaptureSource::UpdateCaptureTargets(const std::string &window_selector, bool force)
@@ -2755,7 +2837,7 @@ void AutoCaptureSource::UpdateCaptureTargets(const std::string &window_selector,
   const AutoCaptureRule *rule = GetActiveRule();
   const AutoCaptureMode mode = rule != nullptr ? rule->capture_mode : AutoCaptureMode::Auto;
 
-  const bool window_moved = force || window_selector != active_window_selector_;
+  const bool window_moved = force || active_window_ != capture_window_ || window_selector != active_window_selector_;
   if (window_moved) {
     // A new target is a new race, so game capture is given its chance again.
     game_stood_down_ = false;
@@ -2779,6 +2861,11 @@ void AutoCaptureSource::UpdateCaptureTargets(const std::string &window_selector,
   }
   active_window_selector_ = window_selector;
   active_game_selector_ = game_selector;
+  if (window_moved) {
+    capture_window_ = window_selector.empty() ? nullptr : active_window_;
+    window_capture_dry_seconds_ = 0.0f;
+    window_capture_retries_ = 0;
+  }
   // A mismatch reported for the previous target says nothing about this one.
   ignored_game_cx_ = 0;
   ignored_game_cy_ = 0;
